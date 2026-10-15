@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+build/
+install/
+log/
+*.egg-info/
+.superpowers/
+.vscode
+# Staged rammp_perception_interfaces checkout (see interfaces/README.md).
+interfaces/*
+!interfaces/README.md
+!interfaces/.gitkeep
