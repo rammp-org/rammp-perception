@@ -1,0 +1,25 @@
+# YOLOE-26s on DLA core 0: frees the GPU (about 1% GPU at 10 Hz on abra) at about 96 ms per frame.
+# The detection head still falls back to the GPU. dla1 runs it on the other core, e.g. for a second camera.
+# The first start builds a TensorRT engine into the volume (about 2 minutes); later starts reuse it.
+id: scene_segmenter_yoloe_dla
+implements: scene_segmenter
+tier: experimental
+kind: docker
+container:
+  image: ghcr.io/rammp-org/rammp-perception/yoloe:main   # pin a release tag in a deployment
+  runtime: nvidia
+  network_mode: host
+  ipc: host
+  user: "1000:1000"
+  volumes:
+    - rammp_perception_engines:/cache/engines
+  environment:
+    ROS_DOMAIN_ID: "0"
+    HOME: /tmp
+params:
+  model: yoloe-26s-seg
+  device: dla0
+  image_topic: /scene_camera/color/image_raw
+  rate_hz: 10.0
+publishes: [/scene_segmenter/instances, /scene_segmenter/detections, /scene_segmenter/overlay/compressed]
+subscribes: [/scene_camera/color/image_raw]

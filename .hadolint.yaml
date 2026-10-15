@@ -1,0 +1,11 @@
+# hadolint configuration.
+#
+# DL3008 (pin apt versions): ignored deliberately, as in kinova-gen3-ros2. The
+# base is rammp-base, itself built on the moving ros:humble tag; pinning apt
+# versions underneath a moving base gives the appearance of reproducibility
+# without the substance. The pin that matters is the rammp-base tag in FROM.
+# SC1091 (cannot follow a sourced file): the Dockerfiles source ROS setup scripts that exist only inside
+# the base image, which hadolint never sees.
+ignored:
+  - DL3008
+  - SC1091

@@ -1,0 +1,35 @@
+# The classes every detector in this repo reports, and how each backend finds them.
+#
+# label      the name published in Instance.label and Detection2D class_id. The only names any node emits.
+# prompts    YOLOE text prompts. Each prompt that fires is reported as its label. Wording matters: on the scene
+#            camera "bowl" finds the food container at 0.65 where "food container" finds nothing.
+# coco       RF-DETR-Seg COCO class names reported as this label. A label with no COCO class is never
+#            reported by RF-DETR.
+# min_score  per-class detection threshold; default_min_score otherwise.
+#
+# Changing prompts or adding a class rebuilds the YOLOE engine on the next start (a few minutes).
+
+default_min_score: 0.25
+
+classes:
+  - label: food container
+    prompts: [bowl, food container, plastic food container, tupperware, lunch box]
+    coco: [bowl]
+
+  - label: drink cup
+    prompts: [cup, mug, drink cup, glass]
+    coco: [cup, wine glass]
+
+  - label: fridge
+    prompts: [refrigerator, fridge]
+    coco: [refrigerator]
+
+  - label: microwave
+    prompts: [microwave]
+    coco: [microwave]
+
+  - label: table
+    prompts: [table, dining table]
+    coco: [dining table]
+    # Seen low and filling most of the frame, the table scores 0.15-0.2 on the scene camera.
+    min_score: 0.15

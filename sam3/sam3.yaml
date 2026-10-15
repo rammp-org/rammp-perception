@@ -1,0 +1,30 @@
+# Defaults for the SAM3 node. Run it, with the weights and the engine cache mounted:
+#
+#   docker run --rm -it --runtime nvidia --network host --ipc host \
+#     -v /path/to/sam3:/models/sam3:ro -v sam3_engines:/cache/engines \
+#     ghcr.io/rammp-org/rammp-perception/sam3:<tag>
+#
+# Build the TensorRT engines into the same volume, once per machine (about 20 minutes on an AGX Orin):
+#
+#   docker run --rm --runtime nvidia -v /path/to/sam3:/models/sam3:ro -v sam3_engines:/cache/engines \
+#     --entrypoint /ros_entrypoint.sh ghcr.io/rammp-org/rammp-perception/sam3:<tag> \
+#     ros2 run rammp_sam3 build_engines
+#
+# /path/to/sam3 is a Hugging Face snapshot of facebook/sam3 (config.json, model.safetensors, tokenizer files).
+sam3:
+  ros__parameters:
+    model_path: /models/sam3
+    engine_dir: /cache/engines
+    use_tensorrt: true
+    # Input sizes, multiples of 336. Detection is the expert query: keep it at 1008. The tracker is seeded by the
+    # detector's masks, and at 336 it stays within 0.95-0.99 mask IoU of 1008 at about 10x the frame rate.
+    detector_resolution: 1008
+    tracker_resolution: 336
+    default_image_topic: /scene_camera/color/image_raw
+    score_threshold: 0.5
+    max_objects: 10
+    # Cap on tracked frames per second, to leave GPU time for the planner.
+    max_tracking_rate_hz: 15.0
+    frame_timeout_s: 2.0
+    status_rate_hz: 2.0
+    publish_overlay: false

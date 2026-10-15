@@ -1,0 +1,21 @@
+# RF-DETR-Seg S with COCO weights on the GPU (PyTorch FP16). Cleanest masks on the bench, but COCO classes
+# only: a class-list label with no `coco` entry (none today) is never reported.
+id: scene_segmenter_rfdetr
+implements: scene_segmenter
+tier: experimental
+kind: docker
+container:
+  image: ghcr.io/rammp-org/rammp-perception/rfdetr:main   # pin a release tag in a deployment
+  runtime: nvidia
+  network_mode: host
+  ipc: host
+  user: "1000:1000"
+  environment:
+    ROS_DOMAIN_ID: "0"
+    HOME: /tmp
+params:
+  model: small
+  image_topic: /scene_camera/color/image_raw
+  rate_hz: 10.0
+publishes: [/scene_segmenter/instances, /scene_segmenter/detections, /scene_segmenter/overlay/compressed]
+subscribes: [/scene_camera/color/image_raw]
