@@ -173,6 +173,8 @@ class BoxerNode(Node):
             try:
                 self._process(msg)
             except Exception as e:  # noqa: BLE001 -- keep publishing; a dead worker looks healthy from outside
+                if not rclpy.ok():  # shutting down mid-frame: the context is gone, so nothing can be published
+                    return
                 self.get_logger().error(
                     f"frame failed, publishing it without 3D boxes: {e!r}",
                     throttle_duration_sec=5.0,
