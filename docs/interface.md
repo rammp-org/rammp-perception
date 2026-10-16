@@ -177,7 +177,9 @@ The four input topics can change at run time, to lift another detector or camera
 ros2 param set /perception/boxer detections_topic /perception/sam3/object_detections
 ```
 
-Measured on abra (AGX Orin, MAXN) with the 1280x720 scene camera: about 63 ms per frame for any number of objects,
+Measured on abra (AGX Orin, MAXN) with the 1280x720 scene camera and YOLOE-26s on DLA0: the node takes about 90 ms
+per frame (73 ms of it lifting) for any number of objects, keeping up with the detector at 8.5 Hz, and adds about
+100 ms to camera-to-result latency;
 GPU+SoC rail about 26 W while lifting continuously. Running a detector on the GPU at the same time slows both; on a DLA
 core it does not. The image carries Boxer's code and checkpoints (CC-BY-NC 4.0, non-commercial) but not the TensorRT
 engines: the first start exports and builds them into `engine_dir` (a few minutes). To build ahead of time:

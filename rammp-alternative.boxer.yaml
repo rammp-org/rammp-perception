@@ -1,5 +1,5 @@
 # BoxerNet 3D boxes for whichever detector is running: republishes its ObjectDetections with each object's 3D box
-# (pose + size). Lifts every detection frame: about 63 ms per frame on abra with the scene camera, GPU.
+# (pose + size). Lifts every detection frame: about 90 ms per frame on abra with the scene camera, GPU.
 # Needs depth registered to color (Orbbec: depth_registration: true) and TF from gravity_frame to the camera.
 # The first start exports and builds TensorRT engines into the volume (a few minutes); later starts reuse them.
 id: object_lifter_boxer
