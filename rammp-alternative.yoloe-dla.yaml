@@ -20,6 +20,9 @@ params:
   model: yoloe-26s-seg
   device: dla0
   image_topic: /scene_camera/color/image_raw
-  rate_hz: 10.0
+  frame_stride: 3   # every 3rd camera frame: 10 Hz from the 30 fps scene camera
+  # BoT-SORT camera-motion compensation costs ~14 ms of CPU per frame: off, the DLA path runs ~9.5 Hz instead
+  # of ~8.4 Hz. Turn it back on (sparseOptFlow) if ids break while the chair moves.
+  gmc_method: none
 publishes: [/scene_segmenter/instances, /scene_segmenter/detections, /scene_segmenter/overlay/compressed]
 subscribes: [/scene_camera/color/image_raw]

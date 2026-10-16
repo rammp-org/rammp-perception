@@ -36,12 +36,14 @@ RUN curl -fsSL https://repo.download.nvidia.com/jetson/jetson-ota-public.asc -o 
  && rm -rf /var/lib/apt/lists/*
 
 # Pinned to the versions measured on abra. torch and torchvision come from rammp-cuda; numpy stays at its pin.
-# clip (Ultralytics' fork, pinned to the commit measured) supplies the tokenizer YOLOE uses to embed prompts.
+# clip (Ultralytics' fork, pinned to the commit measured) supplies the tokenizer YOLOE uses to embed prompts;
+# lap the assignment solver Ultralytics' trackers need.
 # It builds from source, which the base image's pip 22 cannot do: it reports the package as "unknown".
 RUN python3 -m pip install --no-cache-dir pip==24.3.1 \
  && python3 -m pip install --no-cache-dir \
       ultralytics==8.4.174 onnx==1.23.2 onnxslim==0.1.98 numpy==1.26.4 \
-      "clip @ git+https://github.com/ultralytics/CLIP.git@7ffa84b3bfa40c42ecc1c77147a855e69cb2dd40"
+      "clip @ git+https://github.com/ultralytics/CLIP.git@7ffa84b3bfa40c42ecc1c77147a855e69cb2dd40" \
+      lap==0.5.12
 
 # ultralytics and supervision depend on the desktop opencv-python, which needs libGL. Replace it with the
 # headless build (both install into cv2/, so remove both, then reinstall headless).
@@ -71,7 +73,7 @@ RUN . /opt/ros/humble/setup.sh \
 # Build-time check that needs no GPU: the stack imports and the node's modules load. TensorRT is only located:
 # importing it needs libnvdla_compiler.so from the host.
 RUN . /module_ws/install/setup.sh && python3 -c "\
-import importlib.util, ultralytics, clip; \
+import importlib.util, ultralytics, clip, lap; \
 assert importlib.util.find_spec('tensorrt'), 'tensorrt python bindings missing'; \
 from rammp_perception_interfaces.msg import InstanceMasks; \
 import rammp_yoloe.node, rammp_yoloe.engine; \

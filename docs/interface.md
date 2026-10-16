@@ -25,20 +25,26 @@ Subscribed:
 | `image_topic` (`/scene_camera/color/image_raw`) | `sensor_msgs/Image` | `rgb8`, `bgr8`, `rgba8` or `bgra8`; sensor-data QoS |
 
 Every header is the camera frame's header, so `stamp` and `frame_id` match the image the result came from.
-Ids are per frame, 1 to N with the highest score first: the segmenter detects, it does not track. `Instance.state`
-is always `STATE_VISIBLE`. Where masks overlap, the higher-scoring instance owns the pixel.
+Ids are tracked: an object keeps its `Instance.id` from frame to frame while the backend's tracker holds it.
+YOLOE tracks with Ultralytics' built-in BoT-SORT (`model.track`), RF-DETR with Roboflow's `trackers` ByteTrack, the
+pairing Roboflow recommends. A new object gets an id once it has been seen on consecutive frames; an object lost
+for more than `track_buffer_frames` processed frames is dropped and gets a new id if it comes back. When two prompts or COCO classes of
+one label fire on one object, it keeps the older id. `Instance.state` is always `STATE_VISIBLE`. Ids run 1 to
+65535 and wrap. Where masks overlap, the higher-scoring instance owns the pixel.
 
 ### Parameters
 
 Common to every alternative:
 
-| Parameter         | Default                              | Meaning                                                                                      |
-| ----------------- | ------------------------------------ | -------------------------------------------------------------------------------------------- |
-| `image_topic`     | `/scene_camera/color/image_raw`      | camera to segment                                                                            |
-| `rate_hz`         | `10.0`                               | upper bound on processed frames per second; the newest frame is used, older ones are skipped |
-| `classes_file`    | `/etc/rammp/perception/classes.yaml` | the class list; mount a file over it to change classes                                       |
-| `publish_overlay` | `true`                               | draw `~/overlay/compressed` when something subscribes                                        |
-| `mock`            | `false`                              | no model and no camera: publish empty results at `rate_hz`                                   |
+| Parameter             | Default                              | Meaning                                                                                                                                  |
+| --------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `image_topic`         | `/scene_camera/color/image_raw`      | camera to segment                                                                                                                        |
+| `frame_stride`        | `3`                                  | process every Nth camera frame (3 = 10 Hz from a 30 fps camera); a backend slower than that takes the newest frame as soon as it is free |
+| `tracking`            | `true`                               | keep ids across frames with the backend's tracker; `false` numbers them per frame                                                        |
+| `track_buffer_frames` | `10`                                 | processed frames a lost object keeps its id before it is dropped                                                                         |
+| `classes_file`        | `/etc/rammp/perception/classes.yaml` | the class list; mount a file over it to change classes                                                                                   |
+| `publish_overlay`     | `true`                               | draw `~/overlay/compressed` when something subscribes                                                                                    |
+| `mock`                | `false`                              | no model and no camera: publish empty results at 10 Hz                                                                                   |
 
 YOLOE (`rammp-perception/yoloe`):
 

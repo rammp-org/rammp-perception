@@ -32,6 +32,11 @@ RUN pip install --no-cache-dir \
 RUN pip uninstall -y opencv-python opencv-python-headless \
  && pip install --no-cache-dir --no-deps opencv-python-headless==4.11.0.86
 
+# Roboflow's trackers (Apache-2.0) for ByteTrack. Every release with ByteTrack declares numpy>=2, but the code
+# runs on rammp-cuda's numpy 1.26 (checked on abra), so it goes in without its dependency pins.
+RUN pip install --no-cache-dir --no-deps trackers==2.6.1 \
+ && pip install --no-cache-dir rich==13.9.4
+
 # COCO-pretrained RF-DETR-Seg weights (Apache-2.0), at the names and checksums rfdetr 1.11.2 expects.
 ENV RF_HOME=/models/rfdetr
 RUN mkdir -p "$RF_HOME" \
@@ -58,7 +63,7 @@ RUN . /opt/ros/humble/setup.sh \
 
 # Build-time check that needs no GPU: the stack imports and the node's module loads.
 RUN . /module_ws/install/setup.sh && python3 -c "\
-import rfdetr; \
+import rfdetr, trackers; \
 from rammp_perception_interfaces.msg import InstanceMasks; \
 import rammp_rfdetr.node; \
 print('rfdetr ok')"

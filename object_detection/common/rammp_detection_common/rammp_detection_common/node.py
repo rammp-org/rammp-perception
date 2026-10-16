@@ -9,12 +9,14 @@ Topics (relative to the node name, default /scene_segmenter):
                                                                     Detection2D.id = Instance.id
   ~/overlay/compressed  sensor_msgs/CompressedImage                 masks drawn on the frame, only while
                                                                     subscribed and publish_overlay is true
-Ids are per frame (1..N, highest score first): this node detects, it does not track.
+Ids come from the backend's tracker and stay with an object while it is tracked; a backend that does not
+track gets per-frame ids (1..N, highest score first). State is always STATE_VISIBLE: a lost object is dropped.
 Headers copy the camera frame's stamp and frame_id.
 """
 
 from __future__ import annotations
 
+import threading
 import time
 from collections import Counter
 from typing import Callable, Protocol
@@ -38,6 +40,7 @@ _CHANNELS = {
     "rgba8": (4, False),
     "bgra8": (4, True),
 }
+MOCK_RATE_HZ = 10.0
 _PALETTE = np.array(
     [
         [230, 25, 75],
@@ -95,8 +98,12 @@ class DetectorNode(Node):
         super().__init__(node_name)
         p = lambda name, default: self.declare_parameter(name, default).value  # noqa: E731
         self.image_topic = p("image_topic", "/scene_camera/color/image_raw")
-        self.rate_hz = float(p("rate_hz", 10.0))
+        # Process every frame_stride-th camera frame: 1 = every frame, 3 = 10 Hz from a 30 fps camera.
+        self.frame_stride = max(1, int(p("frame_stride", 3)))
         self.publish_overlay = bool(p("publish_overlay", True))
+        # Read by backends that track: whether to, and for how many processed frames a lost object keeps its id.
+        self.tracking = bool(p("tracking", True))
+        self.track_buffer_frames = max(1, int(p("track_buffer_frames", 10)))
         classes_file = p("classes_file", "/etc/rammp/perception/classes.yaml")
         mock = bool(p("mock", False))
 
@@ -118,9 +125,9 @@ class DetectorNode(Node):
         if mock:
             # Hardware-free stand-in: empty results on the real topics at the real rate, no model, no camera.
             self.backend = None
-            self.create_timer(1.0 / self.rate_hz, self._tick_mock)
+            self.create_timer(1.0 / MOCK_RATE_HZ, self._tick_mock)
             self.get_logger().info(
-                f"MOCK: publishing empty results at {self.rate_hz} Hz"
+                f"MOCK: publishing empty results at {MOCK_RATE_HZ} Hz"
             )
             return
 
@@ -128,20 +135,47 @@ class DetectorNode(Node):
         self.get_logger().info(f"backend ready: {self.backend.description}")
 
         self.latest: Image | None = None
-        self.last_stamp = None
+        self.frames_received = 0  # camera frames so far
+        self.frames_at_last = -(
+            10**9
+        )  # frames_received when the last processed frame arrived
+        self.frame_ready = threading.Condition()
         self.create_subscription(
             Image, self.image_topic, self._on_image, qos_profile_sensor_data
         )
-        self.create_timer(1.0 / self.rate_hz, self._tick)
         self.times: list[float] = []
         self.counts: Counter = Counter()
         self.last_log = time.monotonic()
+        self.frames_logged = 0
         self.get_logger().info(
-            f"detecting on {self.image_topic} at up to {self.rate_hz} Hz"
+            f"detecting on {self.image_topic}, every {self.frame_stride} camera frames"
         )
+        threading.Thread(target=self._loop, daemon=True).start()
 
     def _on_image(self, msg: Image) -> None:
-        self.latest = msg
+        with self.frame_ready:
+            self.latest = msg
+            self.frames_received += 1
+            self.frame_ready.notify()
+
+    def _loop(self) -> None:
+        """Process every frame_stride-th camera frame.
+
+        Frames are counted as they arrive. When frame_stride frames have come in since the last processed one,
+        the newest is processed. A frame that takes longer than frame_stride frame periods is not waited out to
+        the next exact multiple (that would halve the rate): the newest frame is taken as soon as the node is
+        free, so a slow backend runs as fast as it can and never faster than the stride.
+        """
+        while rclpy.ok():
+            with self.frame_ready:
+                if not self.frame_ready.wait_for(
+                    lambda: self.latest is not None
+                    and self.frames_received - self.frames_at_last >= self.frame_stride,
+                    timeout=0.5,
+                ):
+                    continue
+                msg, self.frames_at_last = self.latest, self.frames_received
+            self._process(msg)
 
     def _tick_mock(self) -> None:
         header = Image().header
@@ -153,11 +187,7 @@ class DetectorNode(Node):
         )
         self.pub_detections.publish(Detection2DArray(header=header))
 
-    def _tick(self) -> None:
-        msg = self.latest
-        if msg is None or msg.header.stamp == self.last_stamp:
-            return
-        self.last_stamp = msg.header.stamp
+    def _process(self, msg: Image) -> None:
         t0 = time.perf_counter()
         try:
             rgb = image_to_rgb(msg)
@@ -245,10 +275,11 @@ class DetectorNode(Node):
         t = np.array(self.times) * 1000
         per_frame = {k: round(v / len(t), 2) for k, v in sorted(self.counts.items())}
         self.get_logger().info(
-            f"{len(t) / elapsed:.1f} Hz, latency median {np.median(t):.1f} ms "
+            f"{len(t) / elapsed:.1f} Hz (camera {(self.frames_received - self.frames_logged) / elapsed:.1f} Hz), latency median {np.median(t):.1f} ms "
             f"p95 {np.percentile(t, 95):.1f} ms, instances per frame {per_frame}"
         )
         self.times, self.counts, self.last_log = [], Counter(), time.monotonic()
+        self.frames_logged = self.frames_received
 
 
 def run(make_backend: Callable[[Node, ClassMap], Backend], args=None) -> None:

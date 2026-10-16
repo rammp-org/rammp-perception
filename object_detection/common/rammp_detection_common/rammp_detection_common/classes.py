@@ -78,6 +78,14 @@ def box_iou(a: np.ndarray, b: np.ndarray) -> float:
     return float(inter / union) if union > 0 else 0.0
 
 
+MAX_ID = 65535  # ids index the mono16 label image
+
+
+def track_id_to_instance_id(track_id: int) -> int:
+    """A tracker's id (>= 0, growing without bound) as an Instance.id in 1..MAX_ID."""
+    return int(track_id) % MAX_ID + 1
+
+
 def clean(
     dets: list[Detection], classes: ClassMap, iou: float = 0.7
 ) -> list[Detection]:
@@ -85,15 +93,26 @@ def clean(
 
     Several prompts (or COCO classes) can map to one label and fire on the same object, e.g. "bowl" and
     "food container". Within a label, a detection whose box overlaps a higher-scoring one by IoU >= iou is
-    dropped. Returns the survivors, highest score first, with ids 1..N.
+    dropped. Returns the survivors, highest score first.
+
+    Ids: a backend that tracks sets each detection's id; a merged object keeps the lower (older) of its
+    duplicates' ids, so it does not flip between two tracks as their scores swap. A backend that does not
+    track leaves ids at 0, and they are numbered 1..N per frame here.
     """
     kept: list[Detection] = []
     for d in sorted(dets, key=lambda d: -d.score):
         if d.score < classes.min_score(d.label):
             continue
-        if any(k.label == d.label and box_iou(k.box, d.box) >= iou for k in kept):
+        dup = next(
+            (k for k in kept if k.label == d.label and box_iou(k.box, d.box) >= iou),
+            None,
+        )
+        if dup is not None:
+            if d.id and (not dup.id or d.id < dup.id):
+                dup.id = d.id
             continue
         kept.append(d)
-    for i, d in enumerate(kept, start=1):
-        d.id = i
+    if not any(d.id for d in kept):
+        for i, d in enumerate(kept, start=1):
+            d.id = i
     return kept

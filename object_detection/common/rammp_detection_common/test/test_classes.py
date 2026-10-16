@@ -3,13 +3,19 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from rammp_detection_common.classes import ClassMap, Detection, clean
+from rammp_detection_common.classes import (
+    MAX_ID,
+    ClassMap,
+    Detection,
+    clean,
+    track_id_to_instance_id,
+)
 
 CLASSES_YAML = Path(__file__).resolve().parents[3] / "config" / "classes.yaml"
 
 
-def det(label, score, box):
-    return Detection(label=label, score=score, box=np.array(box, float))
+def det(label, score, box, id=0):
+    return Detection(label=label, score=score, box=np.array(box, float), id=id)
 
 
 def test_repo_class_list_loads():
@@ -83,3 +89,37 @@ def test_clean_keeps_overlapping_objects_of_different_labels():
         classes,
     )
     assert len(out) == 2
+
+
+def test_clean_keeps_tracker_ids():
+    classes = ClassMap.load(str(CLASSES_YAML))
+    out = clean(
+        [
+            det("microwave", 0.9, [0, 0, 10, 10], id=7),
+            det("table", 0.5, [20, 20, 90, 90], id=3),
+        ],
+        classes,
+    )
+    assert [d.id for d in out] == [7, 3]
+
+
+def test_a_merged_duplicate_keeps_the_older_track_id():
+    classes = ClassMap.load(str(CLASSES_YAML))
+    out = clean(
+        [
+            det(
+                "food container", 0.65, [0, 0, 100, 100], id=12
+            ),  # "bowl" track, scoring higher this frame
+            det(
+                "food container", 0.40, [2, 2, 100, 100], id=4
+            ),  # "food container" track, older
+        ],
+        classes,
+    )
+    assert [(d.score, d.id) for d in out] == [(0.65, 4)]
+
+
+def test_track_ids_map_into_the_label_image_range():
+    assert track_id_to_instance_id(0) == 1
+    assert track_id_to_instance_id(MAX_ID - 1) == MAX_ID
+    assert track_id_to_instance_id(MAX_ID) == 1
