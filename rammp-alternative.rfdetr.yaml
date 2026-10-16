@@ -1,4 +1,5 @@
-# RF-DETR-Seg S with COCO weights on the GPU (PyTorch FP16). Cleanest masks on the bench, but COCO classes
+# RF-DETR-Seg S with COCO weights on the GPU (PyTorch FP16): about 39 ms per frame and 13% GPU at 10 Hz on abra.
+# Cleanest masks on the bench, but COCO classes
 # only: a class-list label with no `coco` entry (none today) is never reported.
 id: scene_segmenter_rfdetr
 implements: scene_segmenter

@@ -1,6 +1,6 @@
 """The always-on detector node every backend in this repo runs inside.
 
-A backend only turns an RGB frame into Detections with labels from config/classes.yaml. This node does the
+A backend only turns an RGB frame into Detections with labels from object_detection/config/classes.yaml. This node does the
 rest the same way for all of them, so they are interchangeable behind one sheppy node:
 
 Topics (relative to the node name, default /scene_segmenter):

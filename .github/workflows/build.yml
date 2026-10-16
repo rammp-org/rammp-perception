@@ -32,8 +32,8 @@ jobs:
       - name: Unit tests
         run: |
           pytest tests -v
-          (cd common/rammp_detection_common && python -m pytest test -v)
-          (cd sam3/rammp_sam3 && python -m pytest test -v)
+          (cd object_detection/common/rammp_detection_common && python -m pytest test -v)
+          (cd object_detection/sam3/rammp_sam3 && python -m pytest test -v)
 
       - name: Validate the fragments
         run: python3 scripts/validate_fragment.py rammp-alternative*.yaml
@@ -82,7 +82,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ${{ matrix.image }}/Dockerfile
+          file: object_detection/${{ matrix.image }}/Dockerfile
           platforms: linux/arm64
           build-args: INTERFACES_REF=${{ env.INTERFACES_REF }}
           load: true

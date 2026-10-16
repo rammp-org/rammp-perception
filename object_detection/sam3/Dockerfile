@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # SAM3 open-vocabulary detection and tracking. Jetson Orin only: FROM rammp-cuda, run with --runtime nvidia.
-# Build from the repo root: docker build -f sam3/Dockerfile .
+# Build from the repo root: docker build -f object_detection/sam3/Dockerfile .
 #
 # Deliberately not in the image:
 #   * weights. facebook/sam3 is gated on Hugging Face and 3.4 GB. Mount a downloaded snapshot at /models/sam3.
@@ -44,7 +44,7 @@ RUN pip install --no-cache-dir \
 ENV TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor
 
 COPY --from=interfaces /rammp_perception_interfaces /module_ws/src/rammp_perception_interfaces
-COPY sam3/rammp_sam3 /module_ws/src/rammp_sam3
+COPY object_detection/sam3/rammp_sam3 /module_ws/src/rammp_sam3
 WORKDIR /module_ws
 RUN . /opt/ros/humble/setup.sh \
  && . /ros2_ws/install/setup.sh \
@@ -60,7 +60,7 @@ from rammp_perception_interfaces.srv import Detect, StartTracking; \
 import rammp_sam3.node, rammp_sam3.engine, rammp_sam3.build_engines; \
 print('transformers', transformers.__version__, '/ torch', torch.__version__)"
 
-COPY sam3/sam3.yaml /etc/rammp/sam3/sam3.yaml
+COPY object_detection/sam3/sam3.yaml /etc/rammp/sam3/sam3.yaml
 
 # The whole default invocation, so a deployment only appends: sheppy adds `--ros-args --params-file` for its
 # params block. Building engines uses the same image with the entrypoint swapped (see sam3.yaml).

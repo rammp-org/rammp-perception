@@ -19,11 +19,11 @@ and the same class names, so a sheppy profile switches between them without touc
 
 | Alternative | Runs on | Per frame on abra | GPU busy at 10 Hz | Notes |
 | --- | --- | --- | --- | --- |
-| `scene_segmenter_yoloe_gpu` | GPU | ~26 ms | ~8% | YOLOE-26m, the best YOLOE masks |
-| `scene_segmenter_yoloe_dla` | DLA core 0 | ~96 ms | ~1% | YOLOE-26s; frees the GPU for the planner |
-| `scene_segmenter_rfdetr` | GPU | ~40 ms | not yet measured | RF-DETR-Seg S, COCO weights; cleanest masks, COCO classes only |
+| `scene_segmenter_yoloe_gpu` | GPU | ~30 ms | ~12% | YOLOE-26m, the best YOLOE masks |
+| `scene_segmenter_yoloe_dla` | DLA core 0 | ~98 ms | ~2% | YOLOE-26s; frees the GPU for the planner |
+| `scene_segmenter_rfdetr` | GPU | ~39 ms | ~13% | RF-DETR-Seg S, COCO weights; cleanest masks, COCO classes only |
 
-The class list lives in one file, `config/classes.yaml`, built into every image. Each class has a label (the only
+The class list lives in one file, `object_detection/config/classes.yaml`, built into every image. Each class has a label (the only
 name any node publishes), the YOLOE prompts that find it, and the COCO classes RF-DETR reports as it.
 
 ## Start here

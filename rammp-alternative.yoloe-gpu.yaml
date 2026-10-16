@@ -1,5 +1,5 @@
-# YOLOE-26m on the GPU: the best YOLOE masks, about 26 ms per frame and 8% GPU at 10 Hz on abra.
-# The first start builds a TensorRT engine into the volume (a few minutes); later starts reuse it.
+# YOLOE-26m on the GPU: the best YOLOE masks, about 30 ms per frame and 12% GPU at 10 Hz on abra.
+# The first start builds a TensorRT engine into the volume (about 9 minutes); later starts reuse it.
 # Same topics as every other scene_segmenter alternative, so they swap without touching consumers.
 id: scene_segmenter_yoloe_gpu
 implements: scene_segmenter

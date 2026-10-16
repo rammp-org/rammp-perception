@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # YOLOE instance segmentation as an always-on detector, on the GPU or a DLA core (`device` parameter).
 # Jetson Orin only: FROM rammp-cuda, run with --runtime nvidia. Build from the repo root:
-#   docker build -f yoloe/Dockerfile .
+#   docker build -f object_detection/yoloe/Dockerfile .
 #
 # Weights and the text encoder are baked in (small, public). TensorRT engines are not: they are specific to the
 # device, the TensorRT version and the class prompts, so the node builds one into /cache/engines on first start
@@ -60,8 +60,8 @@ ENV YOLO_AUTOINSTALL=false YOLO_OFFLINE=true YOLO_CONFIG_DIR=/tmp/ultralytics
 ENV TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor
 
 COPY --from=interfaces /rammp_perception_interfaces /module_ws/src/rammp_perception_interfaces
-COPY common/rammp_detection_common /module_ws/src/rammp_detection_common
-COPY yoloe/rammp_yoloe /module_ws/src/rammp_yoloe
+COPY object_detection/common/rammp_detection_common /module_ws/src/rammp_detection_common
+COPY object_detection/yoloe/rammp_yoloe /module_ws/src/rammp_yoloe
 WORKDIR /module_ws
 RUN . /opt/ros/humble/setup.sh \
  && . /ros2_ws/install/setup.sh \
@@ -77,7 +77,7 @@ from rammp_perception_interfaces.msg import InstanceMasks; \
 import rammp_yoloe.node, rammp_yoloe.engine; \
 print('ultralytics', ultralytics.__version__)"
 
-COPY config/classes.yaml /etc/rammp/perception/classes.yaml
+COPY object_detection/config/classes.yaml /etc/rammp/perception/classes.yaml
 # World-writable so a fresh named volume mounted here is writable by the host user sheppy runs as.
 RUN mkdir -p /cache/engines && chmod 1777 /cache/engines
 

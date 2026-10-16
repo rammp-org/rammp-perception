@@ -67,7 +67,7 @@ RF-DETR (`rammp-perception/rfdetr`):
 
 ## The class list
 
-`config/classes.yaml`, built into every image at `/etc/rammp/perception/classes.yaml`:
+`object_detection/config/classes.yaml`, built into every image at `/etc/rammp/perception/classes.yaml`:
 
 | Label          | YOLOE prompts                                                       | RF-DETR COCO classes | Threshold |
 | -------------- | ------------------------------------------------------------------- | -------------------- | --------- |
@@ -83,7 +83,7 @@ RF-DETR finds food containers only when they look like bowls.
 
 ## SAM3
 
-`rammp-perception/sam3`, node `sam3`. Parameters and defaults are in `sam3/sam3.yaml`.
+`rammp-perception/sam3`, node `sam3`. Parameters and defaults are in `object_detection/sam3/sam3.yaml`.
 
 | Service / topic        | Type             | What it does                                                                    |
 | ---------------------- | ---------------- | ------------------------------------------------------------------------------- |

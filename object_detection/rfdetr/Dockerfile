@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # RF-DETR-Seg (COCO weights) instance segmentation as an always-on detector on the GPU.
 # Jetson Orin only: FROM rammp-cuda, run with --runtime nvidia. Build from the repo root:
-#   docker build -f rfdetr/Dockerfile .
+#   docker build -f object_detection/rfdetr/Dockerfile .
 
 # rammp_perception_interfaces: the tagged rammp-interfaces-ros2 release, unless a checkout was staged into
 # interfaces/ (gitignored) to build against unreleased changes: `make rfdetr INTERFACES=../rammp-interfaces-ros2`.
@@ -48,8 +48,8 @@ RUN mkdir -p "$RF_HOME" \
 ENV TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor
 
 COPY --from=interfaces /rammp_perception_interfaces /module_ws/src/rammp_perception_interfaces
-COPY common/rammp_detection_common /module_ws/src/rammp_detection_common
-COPY rfdetr/rammp_rfdetr /module_ws/src/rammp_rfdetr
+COPY object_detection/common/rammp_detection_common /module_ws/src/rammp_detection_common
+COPY object_detection/rfdetr/rammp_rfdetr /module_ws/src/rammp_rfdetr
 WORKDIR /module_ws
 RUN . /opt/ros/humble/setup.sh \
  && . /ros2_ws/install/setup.sh \
@@ -63,6 +63,6 @@ from rammp_perception_interfaces.msg import InstanceMasks; \
 import rammp_rfdetr.node; \
 print('rfdetr ok')"
 
-COPY config/classes.yaml /etc/rammp/perception/classes.yaml
+COPY object_detection/config/classes.yaml /etc/rammp/perception/classes.yaml
 
 ENTRYPOINT ["/ros_entrypoint.sh", "ros2", "run", "rammp_rfdetr", "rfdetr_node"]

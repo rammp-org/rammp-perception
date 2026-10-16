@@ -1,4 +1,4 @@
-"""The shared class list (config/classes.yaml) and the per-frame clean-up every backend applies to it.
+"""The shared class list (object_detection/config/classes.yaml) and the per-frame clean-up every backend applies to it.
 
 No ROS and no GPU here, so it is unit-tested on its own.
 """

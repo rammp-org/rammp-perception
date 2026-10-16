@@ -18,7 +18,7 @@ types and class names, so a sheppy profile swaps between them:
 | `/scene_segmenter/overlay/compressed` | `sensor_msgs/CompressedImage`                                    |
 
 The class list (food container, drink cup, fridge, microwave, table) and the prompts and COCO classes behind each
-label are in [`config/classes.yaml`](config/classes.yaml).
+label are in [`object_detection/config/classes.yaml`](object_detection/config/classes.yaml).
 
 Full docs: [`docs/`](docs/index.mdx), published on the RAMMP docs site. Topics, parameters and the class list are in
 the [interface reference](docs/interface.md).
@@ -26,13 +26,14 @@ the [interface reference](docs/interface.md).
 ## Layout
 
 ```
-config/classes.yaml          the shared class list, built into every image
-common/rammp_detection_common  class list, duplicate merging, and the node every segmenter runs in
-yoloe/                       rammp_yoloe package and Dockerfile
-rfdetr/                      rammp_rfdetr package and Dockerfile
-sam3/                        rammp_sam3 package, Dockerfile and default parameters
-interfaces/                  staging for an unreleased rammp_perception_interfaces (gitignored)
-rammp-alternative.*.yaml     sheppy alternatives for rammp-deployments
+object_detection/
+  config/classes.yaml            the shared class list, built into every image
+  common/rammp_detection_common  class list, duplicate merging, and the node every segmenter runs in
+  yoloe/                         rammp_yoloe package and Dockerfile
+  rfdetr/                        rammp_rfdetr package and Dockerfile
+  sam3/                          rammp_sam3 package, Dockerfile and default parameters
+interfaces/                      staging for an unreleased rammp_perception_interfaces (gitignored)
+rammp-alternative.*.yaml         sheppy alternatives for rammp-deployments
 ```
 
 ## Build and test

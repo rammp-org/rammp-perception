@@ -13,7 +13,7 @@ SMOKE_IMAGES := yoloe rfdetr
 build: $(IMAGES)
 
 $(IMAGES): stage-interfaces
-	docker build -f $@/Dockerfile -t $(REGISTRY)/$@:$(TAG) .
+	docker build -f object_detection/$@/Dockerfile -t $(REGISTRY)/$@:$(TAG) .
 
 # Images build against the tagged rammp-interfaces-ros2 release unless INTERFACES names a checkout to stage.
 stage-interfaces:
@@ -25,8 +25,8 @@ check:
 
 test:
 	uv run --with pyyaml --with pytest python -m pytest tests -q
-	cd common/rammp_detection_common && uv run --with pyyaml --with numpy --with pytest python -m pytest test -q
-	cd sam3/rammp_sam3 && uv run --with numpy --with pytest python -m pytest test -q
+	cd object_detection/common/rammp_detection_common && uv run --with pyyaml --with numpy --with pytest python -m pytest test -q
+	cd object_detection/sam3/rammp_sam3 && uv run --with numpy --with pytest python -m pytest test -q
 
 smoke:
 	for i in $(SMOKE_IMAGES); do ./scripts/smoke.sh $(REGISTRY)/$$i:$(TAG) || exit 1; done

@@ -1,4 +1,4 @@
-# YOLOE-26s on DLA core 0: frees the GPU (about 1% GPU at 10 Hz on abra) at about 96 ms per frame.
+# YOLOE-26s on DLA core 0: frees the GPU (about 2% GPU at 10 Hz on abra) at about 98 ms per frame.
 # The detection head still falls back to the GPU. dla1 runs it on the other core, e.g. for a second camera.
 # The first start builds a TensorRT engine into the volume (about 2 minutes); later starts reuse it.
 id: scene_segmenter_yoloe_dla
