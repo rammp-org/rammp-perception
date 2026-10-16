@@ -89,13 +89,15 @@ RF-DETR finds food containers only when they look like bowls.
 | ---------------------- | ---------------- | ------------------------------------------------------------------------------- |
 | `/sam3/detect`         | `Detect`         | One high-quality detection on the next frame.                                   |
 | `/sam3/start_tracking` | `StartTracking`  | Detect, then track every instance and stream it. Ends any open session.         |
-| `/sam3/renew_tracking` | `RenewTracking`  | Extend the open session's lease.                                                |
+| `/sam3/renew_tracking` | `RenewTracking`  | Extend the open session's lease (no-op while leases are disabled).              |
 | `/sam3/stop_tracking`  | `StopTracking`   | End the session.                                                                |
 | `/sam3/instances`      | `InstanceMasks`  | Tracked frames: instances plus a mono16 label image, pixel value = instance id. |
 | `/sam3/status`         | `TrackingStatus` | Session state at 2 Hz.                                                          |
 
-A tracking session holds a lease: it ends `lease_s` after the last start or renew, so a client that crashes
-cannot leave the GPU busy.
+A tracking session runs until `/sam3/stop_tracking`, or until a new `/sam3/start_tracking` replaces it. Leases are
+off by default (`lease_enabled: false`): `lease_s` is ignored and `/sam3/renew_tracking` is a no-op. With
+`lease_enabled: true`, a session ends `lease_s` after the last start or renew, so a client that crashes cannot leave
+the GPU busy.
 
 Detection runs the full model at 1008 px. Tracking runs at 336 px, seeded with the detector's masks. Measured
 through ROS on abra with TensorRT encoders and a 1280x720 camera:

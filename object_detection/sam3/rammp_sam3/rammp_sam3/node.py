@@ -1,9 +1,10 @@
-"""ROS 2 front end for SAM3: one-shot expert detection plus leased tracking sessions.
+"""ROS 2 front end for SAM3: one-shot expert detection plus tracking sessions.
 
 Services (rammp_perception_interfaces):
   ~/detect            Detect          one detection on the next frame; ~0.4-0.8 s
-  ~/start_tracking    StartTracking   detect, then track and publish until stopped or the lease runs out
-  ~/renew_tracking    RenewTracking   extend the open session's lease
+  ~/start_tracking    StartTracking   detect, then track and publish until stopped (or the lease runs out, when
+                                      lease_enabled is true)
+  ~/renew_tracking    RenewTracking   extend the open session's lease; a no-op while leases are disabled
   ~/stop_tracking     StopTracking
 Topics:
   ~/instances         InstanceMasks   every tracked frame (and each detection that seeds or re-seeds a session)
@@ -13,6 +14,7 @@ Topics:
 
 from __future__ import annotations
 
+import math
 import threading
 import time
 from dataclasses import dataclass, field
@@ -160,6 +162,8 @@ class Sam3Node(Node):
         self.frame_timeout = p("frame_timeout_s", 2.0).value
         status_rate = p("status_rate_hz", 2.0).value
         self.publish_overlay = p("publish_overlay", False).value
+        # false: a session runs until StopTracking or a new StartTracking, and lease_s is ignored.
+        self.lease_enabled = p("lease_enabled", False).value
         self.timing_log_period = p(
             "timing_log_period_s", 0.0
         ).value  # > 0: log per-stage tracking times
@@ -321,7 +325,7 @@ class Sam3Node(Node):
         return resp
 
     def on_start(self, req, resp):
-        if not req.prompts or req.lease_s <= 0:
+        if not req.prompts or (self.lease_enabled and req.lease_s <= 0):
             resp.accepted = False
             resp.message = (
                 "prompts must not be empty"
@@ -351,7 +355,7 @@ class Sam3Node(Node):
             lease_s=req.lease_s,
             redetect_period_s=req.redetect_period_s,
             max_objects=req.max_objects or self.default_max_objects,
-            deadline=time.monotonic() + req.lease_s,
+            deadline=time.monotonic() + req.lease_s if self.lease_enabled else math.inf,
         )
         self.next_session_id += 1
         with self.gpu:
@@ -376,6 +380,12 @@ class Sam3Node(Node):
                 resp.renewed, resp.message = (
                     False,
                     f"session {req.session_id} is not open",
+                )
+                return resp
+            if not self.lease_enabled:
+                resp.renewed, resp.message = (
+                    True,
+                    "leases are disabled; the session runs until stopped",
                 )
                 return resp
             s.deadline = time.monotonic() + (
@@ -499,7 +509,9 @@ class Sam3Node(Node):
                 s.prompts,
                 s.topic,
             )
-            msg.lease_remaining_s = max(0.0, s.deadline - time.monotonic())
+            msg.lease_remaining_s = max(
+                0.0, s.deadline - time.monotonic()
+            )  # inf while leases are disabled
             st = [t for t in s.step_times if t > time.monotonic() - 2.0]
             msg.rate_hz = (
                 float((len(st) - 1) / (st[-1] - st[0]))

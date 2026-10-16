@@ -28,3 +28,6 @@ sam3:
     frame_timeout_s: 2.0
     status_rate_hz: 2.0
     publish_overlay: false
+    # false: a tracking session runs until StopTracking or a new StartTracking; lease_s is ignored and
+    # RenewTracking is a no-op. true: a session ends lease_s after the last Start or Renew.
+    lease_enabled: false
