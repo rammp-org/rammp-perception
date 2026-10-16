@@ -35,6 +35,7 @@ jobs:
           pytest tests -v
           (cd object_detection/common/rammp_detection_common && python -m pytest test -v)
           (cd object_detection/sam3/rammp_sam3 && python -m pytest test -v)
+          (cd object_detection/boxer/rammp_boxer && python -m pytest test -v)
 
       - name: Validate the fragments
         run: python3 scripts/validate_fragment.py rammp-alternative*.yaml
@@ -53,6 +54,9 @@ jobs:
             smoke: true
           # Needs a GPU and gated weights to run at all; the Dockerfile's import check is its test.
           - image: sam3
+            smoke: false
+          # Needs a GPU and a camera stream to do anything; the Dockerfile's import check is its test.
+          - image: boxer
             smoke: false
     steps:
       - uses: actions/checkout@v4

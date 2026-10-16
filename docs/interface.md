@@ -31,7 +31,7 @@ Ids are tracked: an object keeps its `instance_id` (`<class>_<n>`, e.g. `microwa
 YOLOE tracks with Ultralytics' built-in BoT-SORT (`model.track`), RF-DETR with Roboflow's `trackers` ByteTrack, the
 pairing Roboflow recommends. A new object gets an id once it has been seen on consecutive frames; an object lost
 for more than `track_buffer_frames` processed frames is dropped and gets a new id if it comes back. When two prompts or COCO classes of
-one label fire on one object, it keeps the older id. `state` is always `STATE_VISIBLE`, and `has_pose` false until depth alignment exists. Ids run 1 to
+one label fire on one object, it keeps the older id. `state` is always `STATE_VISIBLE`, and `has_pose` false: [BoxerNet](#boxernet-3d-boxes) adds 3D boxes on its own topic. Ids run 1 to
 65535 and wrap. Where masks overlap, the higher-scoring instance owns the pixel.
 
 ### Parameters
@@ -130,3 +130,62 @@ docker run --rm --runtime nvidia -v /path/to/sam3:/models/sam3:ro -v sam3_engine
 ```
 
 Without engines the node falls back to PyTorch and logs why.
+
+## BoxerNet 3D boxes
+
+`rammp-perception/boxer`, node `/perception/boxer`. It lifts every object a detector finds to a 3D box with
+[BoxerNet](https://github.com/facebookresearch/boxer) and republishes the detector's `ObjectDetections` on
+`/perception/object_detections_3d`, unchanged except that each visible object gets `has_pose`, `pose` and `size`. It runs
+apart from the detectors, so it works with any of them (SAM3 included) and never slows one down.
+
+`pose` is the 3D box's center, and its axes as orientation, in the message's `header.frame_id` (the camera's optical
+frame); `size` is the box's full extent along those axes in meters. The box is gravity-aligned: its z axis is up in
+`gravity_frame`, and BoxerNet estimates only its yaw about that axis. Yaw is ambiguous by 180 degrees: a box has no front.
+`has_pose` is false for objects BoxerNet is less than `min_prob` confident about, and for every object in a frame it
+could not lift (no depth, camera info or TF for that stamp; the reason is logged).
+
+Per frame it needs the color frame the detections came from (matched by stamp), depth registered to that color frame
+(Orbbec: `depth_registration: true`), the color camera's intrinsics, and TF from `gravity_frame` to the camera at the
+frame's stamp. Only that transform's rotation is used, for gravity.
+
+### Topics
+
+| Topic                              | Type                                           | Notes                                                          |
+| ---------------------------------- | ---------------------------------------------- | -------------------------------------------------------------- |
+| `/perception/object_detections_3d` | `rammp_perception_interfaces/ObjectDetections` | published: the input message with 3D boxes, every frame        |
+| `detections_topic`                 | `rammp_perception_interfaces/ObjectDetections` | subscribed                                                     |
+| `image_topic`, `depth_topic`       | `sensor_msgs/Image`                            | subscribed, sensor-data QoS; depth `16UC1` (mm) or `32FC1` (m) |
+| `camera_info_topic`                | `sensor_msgs/CameraInfo`                       | subscribed; the color camera's                                 |
+
+### Parameters
+
+| Parameter           | Default                            | Meaning                                                         |
+| ------------------- | ---------------------------------- | --------------------------------------------------------------- |
+| `detections_topic`  | `/perception/object_detections`    | the detector to lift                                            |
+| `image_topic`       | `/scene_camera/color/image_raw`    | the color frames those detections came from                     |
+| `depth_topic`       | `/scene_camera/depth/image_raw`    | depth registered to the color frames                            |
+| `camera_info_topic` | `/scene_camera/color/camera_info`  | the color camera's intrinsics                                   |
+| `gravity_frame`     | `base_link`                        | any frame with +z up                                            |
+| `min_prob`          | `0.5`                              | BoxerNet confidence below which an object gets no pose          |
+| `depth_slop_s`      | `0.02`                             | how far apart in time a depth frame may be from its color frame |
+| `output_topic`      | `/perception/object_detections_3d` | where to publish                                                |
+| `engine_dir`        | `/cache/engines`                   | TensorRT engine cache; mount a volume here                      |
+
+The four input topics can change at run time, to lift another detector or camera without a restart:
+
+```bash
+ros2 param set /perception/boxer detections_topic /perception/sam3/object_detections
+```
+
+Measured on abra (AGX Orin, MAXN) with the 1280x720 scene camera and YOLOE-26s on DLA0: the node takes about 90 ms
+per frame (73 ms of it lifting) for any number of objects, keeping up with the detector at 8.5 Hz, and adds about
+100 ms to camera-to-result latency;
+GPU+SoC rail about 26 W while lifting continuously. Running a detector on the GPU at the same time slows both; on a DLA
+core it does not. The image carries Boxer's code and checkpoints (CC-BY-NC 4.0, non-commercial) but not the TensorRT
+engines: the first start exports and builds them into `engine_dir` (a few minutes). To build ahead of time:
+
+```bash
+docker run --rm --runtime nvidia -v rammp_perception_engines:/cache/engines \
+  --entrypoint /ros_entrypoint.sh ghcr.io/rammp-org/rammp-perception/boxer:<tag> \
+  ros2 run rammp_boxer build_engines
+```
