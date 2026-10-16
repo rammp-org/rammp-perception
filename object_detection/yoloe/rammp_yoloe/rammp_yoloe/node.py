@@ -36,7 +36,10 @@ def tracker_config(classes: ClassMap, buffer_frames: int, gmc_method: str) -> st
     cfg.update(
         track_high_thresh=low,
         new_track_thresh=low,
-        track_low_thresh=min(cfg["track_low_thresh"], low / 2),
+        track_low_thresh=min(0.1, low / 2),  # must match YoloeBackend.track_low_thresh
+        # Fusing multiplies each match's IoU by the detection score, so a weak object (the table at ~0.17) can
+        # never clear match_thresh and is never tracked. Match on IoU alone; the class thresholds still apply.
+        fuse_score=False,
         # Processed frames a lost track survives (Ultralytics' trackers assume 30 fps, which leaves it as is).
         track_buffer=buffer_frames,
         gmc_method=gmc_method,
@@ -86,17 +89,31 @@ class YoloeBackend:
             if node.tracking
             else None
         )
+        self.track_low_thresh = min(0.1, classes.lowest_min_score / 2)
         tracking = f"BoT-SORT ({gmc_method})" if self.tracker else "no tracking"
         self.description = f"{model} on {device}, {self.imgsz}px, {tracking}, engine {os.path.basename(path)}"
 
     def infer(self, rgb: np.ndarray) -> list[Detection]:
         bgr = np.ascontiguousarray(rgb[:, :, ::-1])
-        kw = dict(imgsz=self.imgsz, conf=self.classes.lowest_min_score, verbose=False)
         if self.tracker:
-            # Only boxes the tracker holds come back, each with its track id.
-            r = self.model.track(bgr, persist=True, tracker=self.tracker, **kw)[0]
+            # Boxes down to BoT-SORT's low threshold reach the tracker, so its second association pass can hold a
+            # weak object (the table) through a bad frame; clean() still applies the class thresholds after.
+            r = self.model.track(
+                bgr,
+                persist=True,
+                tracker=self.tracker,
+                imgsz=self.imgsz,
+                conf=self.track_low_thresh,
+                verbose=False,
+            )[0]
+            # A frame where the tracker holds nothing comes back as raw, untracked detections: drop them rather
+            # than publish ids outside the tracker's.
+            if r.boxes.id is None:
+                return []
         else:
-            r = self.model.predict(bgr, **kw)[0]
+            r = self.model.predict(
+                bgr, imgsz=self.imgsz, conf=self.classes.lowest_min_score, verbose=False
+            )[0]
         if not len(r.boxes):
             return []
         polys = r.masks.xy if r.masks is not None else [None] * len(r.boxes)

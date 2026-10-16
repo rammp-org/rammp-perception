@@ -7,10 +7,11 @@
 # device, the TensorRT version and the class prompts, so the node builds one into /cache/engines on first start
 # and reuses it after. Mount a volume there.
 
-# rammp_perception_interfaces: the tagged rammp-interfaces-ros2 release, unless a checkout was staged into
+# rammp_perception_interfaces: rammp-interfaces-ros2 at INTERFACES_REF, unless a checkout was staged into
 # interfaces/ (gitignored) to build against unreleased changes: `make yoloe INTERFACES=../rammp-interfaces-ros2`.
 FROM ghcr.io/rammp-org/rammp-cuda:1.1.0-jp6 AS interfaces
-ARG INTERFACES_REF=v1.2.0
+# A branch until rammp-interfaces-ros2 tags a release with the perception package.
+ARG INTERFACES_REF=dev
 COPY interfaces /staged
 RUN if [ -d /staged/rammp_perception_interfaces ]; then \
       echo "using staged rammp_perception_interfaces" && cp -r /staged/rammp_perception_interfaces /rammp_perception_interfaces; \
@@ -84,4 +85,6 @@ RUN mkdir -p /cache/engines && chmod 1777 /cache/engines
 
 # The whole default invocation, so a deployment only appends: sheppy adds `--ros-args --params-file` for its
 # params block, and `-p device:=dla0` moves it to a DLA core.
-ENTRYPOINT ["/ros_entrypoint.sh", "ros2", "run", "rammp_yoloe", "yoloe_node"]
+# The node binary itself, not `ros2 run`: as PID 1, `ros2 run` does not pass SIGTERM on, so `docker stop`
+# would wait out its timeout and SIGKILL the node mid-inference.
+ENTRYPOINT ["/ros_entrypoint.sh", "/module_ws/install/rammp_yoloe/lib/rammp_yoloe/yoloe_node"]

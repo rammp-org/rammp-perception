@@ -21,7 +21,7 @@ if [ -n "${CYCLONEDDS_URI:-}" ]; then
   DDS_ARGS=(-e "CYCLONEDDS_URI=$CYCLONEDDS_URI" -v "$DDS_FILE:$DDS_FILE:ro")
 fi
 
-docker run -d --rm --name "$NAME" --network host "${DDS_ARGS[@]}" \
+docker run -d --name "$NAME" --network host "${DDS_ARGS[@]}" \
   -e ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-0}" "$IMAGE" --ros-args -p mock:=true >/dev/null
 trap 'docker rm -f "$NAME" >/dev/null 2>&1 || true' EXIT
 
@@ -49,4 +49,9 @@ if ! docker exec "$NAME" bash -c \
 fi
 
 docker stop -t 10 "$NAME" >/dev/null
-echo "PASS: $IMAGE publishes and exits on SIGTERM"
+CODE="$(docker inspect -f '{{.State.ExitCode}}' "$NAME")"
+if [ "$CODE" = "137" ]; then
+  echo "FAIL: the node ignored SIGTERM and was killed after the timeout (exit 137)"
+  exit 1
+fi
+echo "PASS: $IMAGE publishes and exits on SIGTERM (exit $CODE)"

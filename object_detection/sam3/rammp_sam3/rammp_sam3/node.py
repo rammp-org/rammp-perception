@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import rclpy
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
-from rclpy.executors import MultiThreadedExecutor
+from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, qos_profile_sensor_data
 from sensor_msgs.msg import Image
@@ -229,7 +229,9 @@ class Sam3Node(Node):
             callback_group=MutuallyExclusiveCallbackGroup(),
         )
         self.frames._ensure(self.default_topic)
-        threading.Thread(target=self.track_loop, daemon=True).start()
+        self.stopping = threading.Event()
+        self.worker = threading.Thread(target=self.track_loop, daemon=True)
+        self.worker.start()
         self.get_logger().info("ready")
 
     # ---- messages ----------------------------------------------------------------------------------------
@@ -341,6 +343,11 @@ class Sam3Node(Node):
             )
             return resp
         topic = req.image_topic or self.default_topic
+        # Wait for the frame first: a start that fails leaves the open session running.
+        frame, err = self._frame_or_error(topic)
+        if frame is None:
+            resp.accepted, resp.message = False, err
+            return resp
         with self.session_lock:
             old, self.session = (
                 self.session,
@@ -350,10 +357,6 @@ class Sam3Node(Node):
             self.get_logger().info(
                 f"session {old.id} ended: replaced by a new StartTracking"
             )
-        frame, err = self._frame_or_error(topic)
-        if frame is None:
-            resp.accepted, resp.message = False, err
-            return resp
         s = Session(
             id=self.next_session_id,
             prompts=list(req.prompts),
@@ -425,68 +428,83 @@ class Sam3Node(Node):
         s.last_detect = s.last_frame = frame.received
 
     def track_loop(self) -> None:
-        while rclpy.ok():
-            with self.session_lock:
-                s = self.session
-                if s is not None and time.monotonic() > s.deadline:
-                    self.get_logger().info(f"session {s.id} ended: lease expired")
-                    self.session = s = None
-            if s is None:
-                time.sleep(0.05)
-                continue
-            t0 = time.monotonic()
-            frame = self.frames.wait(s.topic, newer_than=s.last_frame, timeout=0.2)
-            if frame is None:
-                continue
-            t1 = time.monotonic()
-            # Rate cap: space step *starts* at least 1/max_rate apart, so a step that already takes longer than
-            # that never sleeps.
-            wait = (
-                (s.last_step_start + 1.0 / self.max_rate - t1)
-                if s.last_step_start
-                else 0
-            )
-            if wait > 0:
-                time.sleep(wait)
-            t1s = time.monotonic()
-            s.last_step_start = t1s
-            due = (
-                s.redetect_period_s > 0
-                and time.monotonic() - s.last_detect >= s.redetect_period_s
-            )
-            if s.state is None and not due:
-                s.last_frame = frame.received
-                continue
-            with self.gpu:
-                if (
-                    self.session is not s
-                ):  # stopped or replaced while we waited for the GPU
-                    continue
-                if due:
-                    self._redetect(s, frame)
-                    dets = s.dets
-                else:
-                    dets = self.engine.track(s.state, frame.rgb)
-                    s.dets = dets  # latest masks: what the next re-detection matches ids against
-                    s.last_frame = frame.received
-            if (
-                self.session is not s
-            ):  # stopped while this frame was on the GPU: do not publish it
-                continue
-            t2 = time.monotonic()
-            self._publish(frame, dets)
-            t3 = time.monotonic()
-            s.step_times = (s.step_times + [t3])[-30:]
-            if self.timing_log_period > 0:
-                self._log_timing(
-                    {
-                        "wait_frame": t1 - t0,
-                        "rate_cap": t1s - t1,
-                        "gpu": t2 - t1s,
-                        "publish": t3 - t2,
-                        "age": t3 - frame.received,
-                    }
+        while rclpy.ok() and not self.stopping.is_set():
+            try:
+                self._track_step()
+            except Exception as e:  # noqa: BLE001 -- a dead worker would leave the session "active" forever
+                with self.session_lock:
+                    s, self.session = self.session, None
+                self.get_logger().error(
+                    f"tracking failed, session {s.id if s else '-'} ended: {e!r}"
                 )
+                time.sleep(0.5)
+
+    def stop(self) -> None:
+        """Stop tracking and wait for the step in flight, before the node is destroyed."""
+        self.stopping.set()
+        self.worker.join(timeout=10.0)
+
+    def _track_step(self) -> None:
+        """One tracking step: the next frame of the open session, if any."""
+        with self.session_lock:
+            s = self.session
+            if s is not None and time.monotonic() > s.deadline:
+                self.get_logger().info(f"session {s.id} ended: lease expired")
+                self.session = s = None
+        if s is None:
+            time.sleep(0.05)
+            return
+        t0 = time.monotonic()
+        frame = self.frames.wait(s.topic, newer_than=s.last_frame, timeout=0.2)
+        if frame is None:
+            return
+        t1 = time.monotonic()
+        # Rate cap: space step *starts* at least 1/max_rate apart, so a step that already takes longer than
+        # that never sleeps.
+        wait = (
+            (s.last_step_start + 1.0 / self.max_rate - t1) if s.last_step_start else 0
+        )
+        if wait > 0:
+            time.sleep(wait)
+        t1s = time.monotonic()
+        s.last_step_start = t1s
+        due = (
+            s.redetect_period_s > 0
+            and time.monotonic() - s.last_detect >= s.redetect_period_s
+        )
+        if s.state is None and not due:
+            s.last_frame = frame.received
+            return
+        with self.gpu:
+            if self.session is not s:  # stopped or replaced while we waited for the GPU
+                return
+            if due:
+                self._redetect(s, frame)
+                dets = s.dets
+            else:
+                dets = self.engine.track(s.state, frame.rgb)
+                s.dets = (
+                    dets  # latest masks: what the next re-detection matches ids against
+                )
+                s.last_frame = frame.received
+        if (
+            self.session is not s
+        ):  # stopped while this frame was on the GPU: do not publish it
+            return
+        t2 = time.monotonic()
+        self._publish(frame, dets)
+        t3 = time.monotonic()
+        s.step_times = (s.step_times + [t3])[-30:]
+        if self.timing_log_period > 0:
+            self._log_timing(
+                {
+                    "wait_frame": t1 - t0,
+                    "rate_cap": t1s - t1,
+                    "gpu": t2 - t1s,
+                    "publish": t3 - t2,
+                    "age": t3 - frame.received,
+                }
+            )
 
     def _log_timing(self, sample: dict) -> None:
         for k, v in sample.items():
@@ -536,9 +554,10 @@ def main():
     executor.add_node(node)
     try:
         executor.spin()
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
+        node.stop()
         node.destroy_node()
         rclpy.try_shutdown()
 

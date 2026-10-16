@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+MAX_ID = 65535
+
 
 @dataclass
 class Detection:
@@ -68,5 +70,5 @@ def assign_ids(
     for i, n in enumerate(new):
         if i not in taken_new:
             n.id = next_id
-            next_id += 1
+            next_id = next_id % MAX_ID + 1  # wraps: ids index a mono16 label image
     return next_id

@@ -3,10 +3,11 @@
 # Jetson Orin only: FROM rammp-cuda, run with --runtime nvidia. Build from the repo root:
 #   docker build -f object_detection/rfdetr/Dockerfile .
 
-# rammp_perception_interfaces: the tagged rammp-interfaces-ros2 release, unless a checkout was staged into
+# rammp_perception_interfaces: rammp-interfaces-ros2 at INTERFACES_REF, unless a checkout was staged into
 # interfaces/ (gitignored) to build against unreleased changes: `make rfdetr INTERFACES=../rammp-interfaces-ros2`.
 FROM ghcr.io/rammp-org/rammp-cuda:1.1.0-jp6 AS interfaces
-ARG INTERFACES_REF=v1.2.0
+# A branch until rammp-interfaces-ros2 tags a release with the perception package.
+ARG INTERFACES_REF=dev
 COPY interfaces /staged
 RUN if [ -d /staged/rammp_perception_interfaces ]; then \
       echo "using staged rammp_perception_interfaces" && cp -r /staged/rammp_perception_interfaces /rammp_perception_interfaces; \
@@ -66,4 +67,5 @@ print('rfdetr ok')"
 
 COPY object_detection/config/classes.yaml /etc/rammp/perception/classes.yaml
 
-ENTRYPOINT ["/ros_entrypoint.sh", "ros2", "run", "rammp_rfdetr", "rfdetr_node"]
+# The node binary itself, not `ros2 run`, so SIGTERM reaches it (see the yoloe Dockerfile).
+ENTRYPOINT ["/ros_entrypoint.sh", "/module_ws/install/rammp_rfdetr/lib/rammp_rfdetr/rfdetr_node"]

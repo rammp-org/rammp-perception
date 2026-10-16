@@ -62,3 +62,13 @@ def test_assign_ids_uses_each_previous_id_once():
     assign_ids(new, prev, next_id=2)
     assert sorted(d.id for d in new) == [1, 2]
     assert new[0].id == 1  # the better overlap keeps the id
+
+
+def test_new_ids_wrap_into_the_label_image_range():
+    from rammp_sam3.masks import MAX_ID
+
+    m = np.zeros((4, 4), bool)
+    m[0, 0] = True
+    new = [Detection("cup", 0.9, m.copy()), Detection("cup", 0.8, ~m)]
+    assert assign_ids(new, [], MAX_ID) == 2
+    assert [d.id for d in new] == [MAX_ID, 1]

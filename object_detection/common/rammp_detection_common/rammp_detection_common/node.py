@@ -100,6 +100,8 @@ class DetectorNode(Node):
         node_name: str = "scene_segmenter",
     ):
         super().__init__(node_name, namespace="perception")
+        self.stopping = threading.Event()
+        self.worker: threading.Thread | None = None
         p = lambda name, default: self.declare_parameter(name, default).value  # noqa: E731
         self.image_topic = p("image_topic", "/scene_camera/color/image_raw")
         # Process every frame_stride-th camera frame: 1 = every frame, 3 = 10 Hz from a 30 fps camera.
@@ -154,7 +156,8 @@ class DetectorNode(Node):
         self.get_logger().info(
             f"detecting on {self.image_topic}, every {self.frame_stride} camera frames"
         )
-        threading.Thread(target=self._loop, daemon=True).start()
+        self.worker = threading.Thread(target=self._loop, daemon=True)
+        self.worker.start()
 
     def _on_image(self, msg: Image) -> None:
         with self.frame_ready:
@@ -170,7 +173,7 @@ class DetectorNode(Node):
         the next exact multiple (that would halve the rate): the newest frame is taken as soon as the node is
         free, so a slow backend runs as fast as it can and never faster than the stride.
         """
-        while rclpy.ok():
+        while rclpy.ok() and not self.stopping.is_set():
             with self.frame_ready:
                 if not self.frame_ready.wait_for(
                     lambda: self.latest is not None
@@ -179,7 +182,18 @@ class DetectorNode(Node):
                 ):
                     continue
                 msg, self.frames_at_last = self.latest, self.frames_received
-            self._process(msg)
+            try:
+                self._process(msg)
+            except Exception as e:  # noqa: BLE001 -- keep publishing; a dead worker looks healthy from outside
+                self.get_logger().error(
+                    f"frame failed, skipping it: {e!r}", throttle_duration_sec=5.0
+                )
+
+    def stop(self) -> None:
+        """Stop the worker and wait for the frame in flight, before the node is destroyed."""
+        self.stopping.set()
+        if self.worker is not None:
+            self.worker.join(timeout=10.0)
 
     def _tick_mock(self) -> None:
         header = Image().header
@@ -283,5 +297,6 @@ def run(make_backend: Callable[[Node, ClassMap], Backend], args=None) -> None:
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
+        node.stop()
         node.destroy_node()
         rclpy.try_shutdown()

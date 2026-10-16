@@ -11,7 +11,8 @@
 # The interface package: the tagged release, unless a checkout was staged into interfaces/ (gitignored) to build
 # against unreleased changes: `make sam3 INTERFACES=../rammp-interfaces-ros2`.
 FROM ghcr.io/rammp-org/rammp-cuda:1.1.0-jp6 AS interfaces
-ARG INTERFACES_REF=v1.2.0
+# A branch until rammp-interfaces-ros2 tags a release with the perception package.
+ARG INTERFACES_REF=dev
 COPY interfaces /staged
 RUN if [ -d /staged/rammp_perception_interfaces ]; then \
       echo "using staged rammp_perception_interfaces" && cp -r /staged/rammp_perception_interfaces /rammp_perception_interfaces; \
@@ -64,5 +65,6 @@ COPY object_detection/sam3/sam3.yaml /etc/rammp/sam3/sam3.yaml
 
 # The whole default invocation, so a deployment only appends: sheppy adds `--ros-args --params-file` for its
 # params block. Building engines uses the same image with the entrypoint swapped (see sam3.yaml).
-ENTRYPOINT ["/ros_entrypoint.sh", "ros2", "run", "rammp_sam3", "sam3_node", \
+# The node binary itself, not `ros2 run`, so SIGTERM reaches it (see the yoloe Dockerfile).
+ENTRYPOINT ["/ros_entrypoint.sh", "/module_ws/install/rammp_sam3/lib/rammp_sam3/sam3_node", \
             "--ros-args", "-r", "__node:=sam3", "--params-file", "/etc/rammp/sam3/sam3.yaml"]

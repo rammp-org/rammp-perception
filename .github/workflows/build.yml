@@ -13,8 +13,9 @@ permissions:
   packages: write
 
 env:
-  # The rammp-interfaces-ros2 release that carries rammp_perception_interfaces.
-  INTERFACES_REF: v1.2.0
+  # rammp-interfaces-ros2 ref that carries rammp_perception_interfaces. A branch, not a release, until
+  # interfaces tags one: these are test images.
+  INTERFACES_REF: dev
 
 jobs:
   fragment:
