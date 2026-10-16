@@ -36,16 +36,16 @@ docker run ... -e CYCLONEDDS_URI=file://$C -v $C:$C:ro ...
 ```
 
 The first start of a YOLOE configuration builds its TensorRT engine; the log says so and how long to expect.
-Once running, the node logs its rate, latency and instances per frame every 10 seconds.
+Once running, the node logs its rate, latency and objects per frame every 10 seconds.
 
 ## Look at the output
 
 ```bash
-ros2 topic hz /scene_segmenter/instances
-ros2 topic echo --no-arr /scene_segmenter/detections
+ros2 topic hz /perception/object_detections
+ros2 topic echo --no-arr /perception/object_detections
 ```
 
-`/scene_segmenter/overlay/compressed` shows the masks on the camera frame in Foxglove or `rqt_image_view`.
+`/perception/scene_segmenter/overlay/compressed` shows the masks on the camera frame in Foxglove or `rqt_image_view`.
 
 ## Run it under sheppy
 

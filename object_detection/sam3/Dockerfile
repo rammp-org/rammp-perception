@@ -56,7 +56,7 @@ RUN . /opt/ros/humble/setup.sh \
 RUN . /module_ws/install/setup.sh && python3 -c "\
 import importlib.util, transformers, torch; \
 assert importlib.util.find_spec('tensorrt'), 'tensorrt python bindings missing'; \
-from rammp_perception_interfaces.srv import Detect, StartTracking; \
+from rammp_perception_interfaces.srv import Detect, StartTracking; from rammp_perception_interfaces.msg import ObjectDetections; \
 import rammp_sam3.node, rammp_sam3.engine, rammp_sam3.build_engines; \
 print('transformers', transformers.__version__, '/ torch', torch.__version__)"
 

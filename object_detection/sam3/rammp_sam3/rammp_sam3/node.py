@@ -7,7 +7,7 @@ Services (rammp_perception_interfaces):
   ~/renew_tracking    RenewTracking   extend the open session's lease; a no-op while leases are disabled
   ~/stop_tracking     StopTracking
 Topics:
-  ~/instances         InstanceMasks   every tracked frame (and each detection that seeds or re-seeds a session)
+  ~/object_detections ObjectDetections every tracked frame (and each detection that seeds or re-seeds a session)
   ~/status            TrackingStatus  at status_rate_hz, always
   ~/overlay           sensor_msgs/Image (rgb8) masks drawn on the frame, only when publish_overlay is true
 """
@@ -27,7 +27,11 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, qos_profile_sensor_data
 from sensor_msgs.msg import Image
 
-from rammp_perception_interfaces.msg import Instance, InstanceMasks, TrackingStatus
+from rammp_perception_interfaces.msg import (
+    DetectedObject,
+    ObjectDetections,
+    TrackingStatus,
+)
 from rammp_perception_interfaces.srv import (
     Detect,
     RenewTracking,
@@ -146,7 +150,7 @@ class Session:
 
 class Sam3Node(Node):
     def __init__(self):
-        super().__init__("sam3")
+        super().__init__("sam3", namespace="perception")
         p = self.declare_parameter
         self.model_path = p("model_path", "/models/sam3").value
         self.engine_dir = p("engine_dir", "/cache/engines").value
@@ -192,8 +196,8 @@ class Sam3Node(Node):
 
         self.frames = FrameHub(self, ReentrantCallbackGroup())
         services = MutuallyExclusiveCallbackGroup()
-        self.pub_instances = self.create_publisher(
-            InstanceMasks, "~/instances", QoSProfile(depth=2)
+        self.pub_detections = self.create_publisher(
+            ObjectDetections, "~/object_detections", QoSProfile(depth=2)
         )
         self.pub_status = self.create_publisher(
             TrackingStatus, "~/status", QoSProfile(depth=2)
@@ -230,16 +234,19 @@ class Sam3Node(Node):
 
     # ---- messages ----------------------------------------------------------------------------------------
     @staticmethod
-    def _instance(d: Detection) -> Instance:
-        return Instance(
-            id=d.id,
-            label=d.label,
+    def _object(d: Detection) -> DetectedObject:
+        return DetectedObject(
+            instance_id=f"{d.label.replace(' ', '_')}_{d.id}",
+            perception_class=d.label,
             score=float(d.score),
-            state=Instance.STATE_VISIBLE if d.visible else Instance.STATE_OCCLUDED,
+            state=DetectedObject.STATE_VISIBLE
+            if d.visible
+            else DetectedObject.STATE_OCCLUDED,
             box=[float(v) for v in d.box],
+            mask_id=d.id if d.visible else 0,
         )
 
-    def _masks_msg(self, frame: Frame, dets: list[Detection]) -> InstanceMasks:
+    def _masks_msg(self, frame: Frame, dets: list[Detection]) -> ObjectDetections:
         h, w = frame.rgb.shape[:2]
         lab = label_image(dets, h, w)
         img = Image(
@@ -251,15 +258,15 @@ class Sam3Node(Node):
             step=w * 2,
             data=lab.tobytes(),
         )
-        return InstanceMasks(
+        return ObjectDetections(
             header=frame.msg.header,
-            instances=[self._instance(d) for d in dets],
+            objects=[self._object(d) for d in dets],
             label_image=img,
         )
 
-    def _publish(self, frame: Frame, dets: list[Detection]) -> InstanceMasks:
+    def _publish(self, frame: Frame, dets: list[Detection]) -> ObjectDetections:
         msg = self._masks_msg(frame, dets)
-        self.pub_instances.publish(msg)
+        self.pub_detections.publish(msg)
         if self.pub_overlay is not None:
             self.pub_overlay.publish(self._overlay(frame, dets))
         return msg
@@ -518,7 +525,7 @@ class Sam3Node(Node):
                 if len(st) > 1 and st[-1] > st[0]
                 else 0.0
             )
-            msg.instances = [self._instance(d) for d in s.dets]
+            msg.objects = [self._object(d) for d in s.dets]
         self.pub_status.publish(msg)
 
 

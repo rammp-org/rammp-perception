@@ -3,14 +3,14 @@
 A backend only turns an RGB frame into Detections with labels from object_detection/config/classes.yaml. This node does the
 rest the same way for all of them, so they are interchangeable behind one sheppy node:
 
-Topics (relative to the node name, default /scene_segmenter):
-  ~/instances           rammp_perception_interfaces/InstanceMasks   every processed frame; mono16 label image
-  ~/detections          vision_msgs/Detection2DArray                the same instances as boxes;
-                                                                    Detection2D.id = Instance.id
-  ~/overlay/compressed  sensor_msgs/CompressedImage                 masks drawn on the frame, only while
-                                                                    subscribed and publish_overlay is true
+Topics (the node runs as /perception/scene_segmenter):
+  /perception/object_detections  rammp_perception_interfaces/ObjectDetections  every processed frame: objects and
+                                                                                a mono16 label image of their masks
+  ~/overlay/compressed           sensor_msgs/CompressedImage                    masks drawn on the frame, only while
+                                                                                subscribed and publish_overlay is true
 Ids come from the backend's tracker and stay with an object while it is tracked; a backend that does not
-track gets per-frame ids (1..N, highest score first). State is always STATE_VISIBLE: a lost object is dropped.
+track gets per-frame ids (1..N, highest score first). instance_id is "<class>_<id>"; mask_id is the id.
+State is always STATE_VISIBLE: a lost object is dropped.
 Headers copy the camera frame's stamp and frame_id.
 """
 
@@ -28,9 +28,8 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CompressedImage, Image
-from vision_msgs.msg import Detection2D, Detection2DArray, ObjectHypothesisWithPose
 
-from rammp_perception_interfaces.msg import Instance, InstanceMasks
+from rammp_perception_interfaces.msg import DetectedObject, ObjectDetections
 
 from .classes import ClassMap, Detection, clean
 
@@ -65,6 +64,11 @@ class Backend(Protocol):
         """Detections for one H x W x 3 RGB frame, labels already mapped to the class list."""
 
 
+def instance_id(label: str, id: int) -> str:
+    """DetectedObject.instance_id: "<class>_<id>", e.g. "food_container_3"."""
+    return f"{label.replace(' ', '_')}_{id}"
+
+
 def image_to_rgb(msg: Image) -> np.ndarray:
     if msg.encoding not in _CHANNELS:
         raise ValueError(
@@ -95,7 +99,7 @@ class DetectorNode(Node):
         make_backend: Callable[[Node, ClassMap], Backend],
         node_name: str = "scene_segmenter",
     ):
-        super().__init__(node_name)
+        super().__init__(node_name, namespace="perception")
         p = lambda name, default: self.declare_parameter(name, default).value  # noqa: E731
         self.image_topic = p("image_topic", "/scene_camera/color/image_raw")
         # Process every frame_stride-th camera frame: 1 = every frame, 3 = 10 Hz from a 30 fps camera.
@@ -114,9 +118,9 @@ class DetectorNode(Node):
         }
         self.get_logger().info(f"classes from {classes_file}: {self.classes.labels}")
 
-        self.pub_instances = self.create_publisher(InstanceMasks, "~/instances", 10)
+        # Not under the node's name: one topic, whichever segmenter is running.
         self.pub_detections = self.create_publisher(
-            Detection2DArray, "~/detections", 10
+            ObjectDetections, "object_detections", 10
         )
         self.pub_overlay = self.create_publisher(
             CompressedImage, "~/overlay/compressed", 10
@@ -180,12 +184,11 @@ class DetectorNode(Node):
     def _tick_mock(self) -> None:
         header = Image().header
         header.stamp = self.get_clock().now().to_msg()
-        self.pub_instances.publish(
-            InstanceMasks(
+        self.pub_detections.publish(
+            ObjectDetections(
                 header=header, label_image=Image(header=header, encoding="mono16")
             )
         )
-        self.pub_detections.publish(Detection2DArray(header=header))
 
     def _process(self, msg: Image) -> None:
         t0 = time.perf_counter()
@@ -208,7 +211,7 @@ class DetectorNode(Node):
 
     def _publish(self, msg: Image, dets: list[Detection], labels: np.ndarray) -> None:
         h, w = labels.shape
-        out = InstanceMasks(header=msg.header)
+        out = ObjectDetections(header=msg.header)
         out.label_image = Image(
             header=msg.header,
             height=h,
@@ -218,28 +221,18 @@ class DetectorNode(Node):
             step=w * 2,
             data=labels.tobytes(),
         )
-        arr = Detection2DArray(header=msg.header)
         for d in dets:
-            box = [float(v) for v in d.box]
-            out.instances.append(
-                Instance(
-                    id=d.id,
-                    label=d.label,
+            out.objects.append(
+                DetectedObject(
+                    instance_id=instance_id(d.label, d.id),
+                    perception_class=d.label,
                     score=float(d.score),
-                    state=Instance.STATE_VISIBLE,
-                    box=box,
+                    state=DetectedObject.STATE_VISIBLE,
+                    box=[float(v) for v in d.box],
+                    mask_id=d.id,
                 )
             )
-            det = Detection2D(header=msg.header, id=str(d.id))
-            det.bbox.center.position.x = (box[0] + box[2]) / 2
-            det.bbox.center.position.y = (box[1] + box[3]) / 2
-            det.bbox.size_x, det.bbox.size_y = box[2] - box[0], box[3] - box[1]
-            hyp = ObjectHypothesisWithPose()
-            hyp.hypothesis.class_id, hyp.hypothesis.score = d.label, float(d.score)
-            det.results.append(hyp)
-            arr.detections.append(det)
-        self.pub_instances.publish(out)
-        self.pub_detections.publish(arr)
+        self.pub_detections.publish(out)
 
     def _publish_overlay(
         self, msg: Image, rgb: np.ndarray, dets: list[Detection], labels: np.ndarray

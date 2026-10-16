@@ -82,7 +82,7 @@ MAX_ID = 65535  # ids index the mono16 label image
 
 
 def track_id_to_instance_id(track_id: int) -> int:
-    """A tracker's id (>= 0, growing without bound) as an Instance.id in 1..MAX_ID."""
+    """A tracker's id (>= 0, growing without bound) as an object id (DetectedObject.mask_id, and the <n> of its instance_id) in 1..MAX_ID."""
     return int(track_id) % MAX_ID + 1
 
 

@@ -32,13 +32,12 @@ RUN curl -fsSL https://repo.download.nvidia.com/jetson/jetson-ota-public.asc -o 
  && apt-get install -y --no-install-recommends \
       "libnvinfer10=${TRT_VERSION}" "libnvinfer-plugin10=${TRT_VERSION}" "libnvinfer-vc-plugin10=${TRT_VERSION}" \
       "libnvonnxparsers10=${TRT_VERSION}" "python3-libnvinfer=${TRT_VERSION}" \
-      ros-humble-vision-msgs \
  && rm -rf /var/lib/apt/lists/*
 
 # Pinned to the versions measured on abra. torch and torchvision come from rammp-cuda; numpy stays at its pin.
-# clip (Ultralytics' fork, pinned to the commit measured) supplies the tokenizer YOLOE uses to embed prompts;
-# lap the assignment solver Ultralytics' trackers need.
-# It builds from source, which the base image's pip 22 cannot do: it reports the package as "unknown".
+# clip (Ultralytics' fork, pinned to the commit measured) supplies the tokenizer YOLOE uses to embed prompts. It
+# builds from source, which the base image's pip 22 cannot do (it reports the package as "unknown"), hence the
+# newer pip. lap is the assignment solver Ultralytics' trackers need.
 RUN python3 -m pip install --no-cache-dir pip==24.3.1 \
  && python3 -m pip install --no-cache-dir \
       ultralytics==8.4.174 onnx==1.23.2 onnxslim==0.1.98 numpy==1.26.4 \
@@ -75,7 +74,7 @@ RUN . /opt/ros/humble/setup.sh \
 RUN . /module_ws/install/setup.sh && python3 -c "\
 import importlib.util, ultralytics, clip, lap; \
 assert importlib.util.find_spec('tensorrt'), 'tensorrt python bindings missing'; \
-from rammp_perception_interfaces.msg import InstanceMasks; \
+from rammp_perception_interfaces.msg import ObjectDetections; \
 import rammp_yoloe.node, rammp_yoloe.engine; \
 print('ultralytics', ultralytics.__version__)"
 

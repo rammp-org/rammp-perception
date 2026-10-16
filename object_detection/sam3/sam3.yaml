@@ -11,7 +11,7 @@
 #     ros2 run rammp_sam3 build_engines
 #
 # /path/to/sam3 is a Hugging Face snapshot of facebook/sam3 (config.json, model.safetensors, tokenizer files).
-sam3:
+/**:
   ros__parameters:
     model_path: /models/sam3
     engine_dir: /cache/engines

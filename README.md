@@ -8,14 +8,16 @@ Object segmentation for RAMMP, as ROS 2 nodes in Docker images run by sheppy:
 | `ghcr.io/rammp-org/rammp-perception/rfdetr` | always-on scene segmenter, RF-DETR-Seg (COCO) | GPU                                    |
 | `ghcr.io/rammp-org/rammp-perception/sam3`   | on-demand expert detection and tracking, SAM3 | GPU                                    |
 
-The three scene segmenter alternatives (YOLOE on the GPU, YOLOE on the DLA, RF-DETR) publish the same topics,
-types and class names, so a sheppy profile swaps between them:
+Every detector publishes one detection message, `rammp_perception_interfaces/ObjectDetections`: the objects
+(`instance_id` like `microwave_2`, stable while tracked, class, score, box) plus one mono16 label image of
+their masks. The three scene segmenter alternatives (YOLOE on the GPU, YOLOE on the DLA, RF-DETR) publish it on
+the same topic with the same class names, so a sheppy profile swaps between them:
 
-| Topic                                 | Type                                                             |
-| ------------------------------------- | ---------------------------------------------------------------- |
-| `/scene_segmenter/instances`          | `rammp_perception_interfaces/InstanceMasks` (mono16 label image) |
-| `/scene_segmenter/detections`         | `vision_msgs/Detection2DArray`                                   |
-| `/scene_segmenter/overlay/compressed` | `sensor_msgs/CompressedImage`                                    |
+| Topic                                            | Type                                           | Publisher                                                 |
+| ------------------------------------------------ | ---------------------------------------------- | --------------------------------------------------------- |
+| `/perception/object_detections`                  | `rammp_perception_interfaces/ObjectDetections` | the scene segmenter, always on; the Orchestrator reads it |
+| `/perception/sam3/object_detections`             | `rammp_perception_interfaces/ObjectDetections` | SAM3, during a tracking session                           |
+| `/perception/scene_segmenter/overlay/compressed` | `sensor_msgs/CompressedImage`                  | masks drawn on the frame, for viewing                     |
 
 The class list (food container, drink cup, fridge, microwave, table) and the prompts and COCO classes behind each
 label are in [`object_detection/config/classes.yaml`](object_detection/config/classes.yaml).

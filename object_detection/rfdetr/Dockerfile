@@ -19,10 +19,6 @@ FROM ghcr.io/rammp-org/rammp-cuda:1.1.0-jp6
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-RUN apt-get update \
- && apt-get install -y --no-install-recommends ros-humble-vision-msgs \
- && rm -rf /var/lib/apt/lists/*
-
 # Pinned to the versions measured on abra. torch and torchvision come from rammp-cuda; numpy stays at its pin.
 RUN pip install --no-cache-dir \
       rfdetr==1.11.2 transformers==5.19.0 supervision==0.30.9 numpy==1.26.4
@@ -64,7 +60,7 @@ RUN . /opt/ros/humble/setup.sh \
 # Build-time check that needs no GPU: the stack imports and the node's module loads.
 RUN . /module_ws/install/setup.sh && python3 -c "\
 import rfdetr, trackers; \
-from rammp_perception_interfaces.msg import InstanceMasks; \
+from rammp_perception_interfaces.msg import ObjectDetections; \
 import rammp_rfdetr.node; \
 print('rfdetr ok')"
 

@@ -13,4 +13,4 @@ container:
     HOME: /tmp
 params:
   mock: true
-publishes: [/scene_segmenter/instances, /scene_segmenter/detections]
+publishes: [/perception/object_detections]

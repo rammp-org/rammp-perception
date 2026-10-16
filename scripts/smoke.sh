@@ -41,9 +41,9 @@ fi
 
 if ! docker exec "$NAME" bash -c \
     '. /opt/ros/humble/setup.bash && . /ros2_ws/install/setup.bash && . /module_ws/install/setup.bash \
-     && timeout 10 ros2 topic echo --once --no-arr /scene_segmenter/instances' \
+     && timeout 10 ros2 topic echo --once --no-arr /perception/object_detections' \
     >/dev/null 2>&1; then
-  echo "FAIL: nothing received on /scene_segmenter/instances"
+  echo "FAIL: nothing received on /perception/object_detections"
   docker logs "$NAME" 2>&1 | tail -20
   exit 1
 fi

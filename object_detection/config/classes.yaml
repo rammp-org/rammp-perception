@@ -1,6 +1,7 @@
 # The classes every detector in this repo reports, and how each backend finds them.
 #
-# label      the name published in Instance.label and Detection2D class_id. The only names any node emits.
+# label      the name published as DetectedObject.perception_class (and in its instance_id). The only names any
+#            segmenter emits.
 # prompts    YOLOE text prompts. Each prompt that fires is reported as its label. Wording matters: on the scene
 #            camera "bowl" finds the food container at 0.65 where "food container" finds nothing.
 # coco       RF-DETR-Seg COCO class names reported as this label. A label with no COCO class is never

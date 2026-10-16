@@ -1,22 +1,24 @@
 # Interface reference
 
 Message types come from `rammp_perception_interfaces` in
-[rammp-interfaces-ros2](https://github.com/rammp-org/rammp-interfaces-ros2) and from the standard `vision_msgs`.
+[rammp-interfaces-ros2](https://github.com/rammp-org/rammp-interfaces-ros2). Every detector publishes one
+detection message, `ObjectDetections`: the objects in a camera frame plus one mono16 label image of their masks.
+Every node runs in the `/perception` namespace.
 
 ## Scene segmenter
 
-Every alternative (`yoloe` on GPU or DLA, `rfdetr`) runs the same node from `rammp_detection_common`. Its default
-name is `scene_segmenter`.
+Every alternative (`yoloe` on GPU or DLA, `rfdetr`) runs the same node from `rammp_detection_common`, as
+`/perception/scene_segmenter`. Detections go to `/perception/object_detections`, not under the node's name, so
+consumers do not depend on which segmenter is running.
 
 ### Topics
 
 Published:
 
-| Topic                                 | Type                                        | Notes                                                                                    |
-| ------------------------------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `/scene_segmenter/instances`          | `rammp_perception_interfaces/InstanceMasks` | every processed frame; `label_image` is mono16, pixel value = `Instance.id`, 0 for none  |
-| `/scene_segmenter/detections`         | `vision_msgs/Detection2DArray`              | the same instances as boxes; `Detection2D.id` = `Instance.id`, `class_id` = label        |
-| `/scene_segmenter/overlay/compressed` | `sensor_msgs/CompressedImage`               | masks and labels drawn on the frame; only while subscribed and `publish_overlay` is true |
+| Topic                                            | Type                                           | Notes                                                                                                                                 |
+| ------------------------------------------------ | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `/perception/object_detections`                  | `rammp_perception_interfaces/ObjectDetections` | every processed frame; `label_image` is mono16, pixel value = `DetectedObject.mask_id`, 0 for none. The Orchestrator reads this topic |
+| `/perception/scene_segmenter/overlay/compressed` | `sensor_msgs/CompressedImage`                  | masks and labels drawn on the frame; only while subscribed and `publish_overlay` is true                                              |
 
 Subscribed:
 
@@ -25,11 +27,11 @@ Subscribed:
 | `image_topic` (`/scene_camera/color/image_raw`) | `sensor_msgs/Image` | `rgb8`, `bgr8`, `rgba8` or `bgra8`; sensor-data QoS |
 
 Every header is the camera frame's header, so `stamp` and `frame_id` match the image the result came from.
-Ids are tracked: an object keeps its `Instance.id` from frame to frame while the backend's tracker holds it.
+Ids are tracked: an object keeps its `instance_id` (`<class>_<n>`, e.g. `microwave_2`) and `mask_id` from frame to frame while the backend's tracker holds it.
 YOLOE tracks with Ultralytics' built-in BoT-SORT (`model.track`), RF-DETR with Roboflow's `trackers` ByteTrack, the
 pairing Roboflow recommends. A new object gets an id once it has been seen on consecutive frames; an object lost
 for more than `track_buffer_frames` processed frames is dropped and gets a new id if it comes back. When two prompts or COCO classes of
-one label fire on one object, it keeps the older id. `Instance.state` is always `STATE_VISIBLE`. Ids run 1 to
+one label fire on one object, it keeps the older id. `state` is always `STATE_VISIBLE`, and `has_pose` false until depth alignment exists. Ids run 1 to
 65535 and wrap. Where masks overlap, the higher-scoring instance owns the pixel.
 
 ### Parameters
@@ -89,19 +91,19 @@ RF-DETR finds food containers only when they look like bowls.
 
 ## SAM3
 
-`rammp-perception/sam3`, node `sam3`. Parameters and defaults are in `object_detection/sam3/sam3.yaml`.
+`rammp-perception/sam3`, node `/perception/sam3`. Parameters and defaults are in `object_detection/sam3/sam3.yaml`.
 
-| Service / topic        | Type             | What it does                                                                    |
-| ---------------------- | ---------------- | ------------------------------------------------------------------------------- |
-| `/sam3/detect`         | `Detect`         | One high-quality detection on the next frame.                                   |
-| `/sam3/start_tracking` | `StartTracking`  | Detect, then track every instance and stream it. Ends any open session.         |
-| `/sam3/renew_tracking` | `RenewTracking`  | Extend the open session's lease (no-op while leases are disabled).              |
-| `/sam3/stop_tracking`  | `StopTracking`   | End the session.                                                                |
-| `/sam3/instances`      | `InstanceMasks`  | Tracked frames: instances plus a mono16 label image, pixel value = instance id. |
-| `/sam3/status`         | `TrackingStatus` | Session state at 2 Hz.                                                          |
+| Service / topic                      | Type               | What it does                                                                |
+| ------------------------------------ | ------------------ | --------------------------------------------------------------------------- |
+| `/perception/sam3/detect`            | `Detect`           | One high-quality detection on the next frame.                               |
+| `/perception/sam3/start_tracking`    | `StartTracking`    | Detect, then track every instance and stream it. Ends any open session.     |
+| `/perception/sam3/renew_tracking`    | `RenewTracking`    | Extend the open session's lease (no-op while leases are disabled).          |
+| `/perception/sam3/stop_tracking`     | `StopTracking`     | End the session.                                                            |
+| `/perception/sam3/object_detections` | `ObjectDetections` | Tracked frames: objects plus a mono16 label image, pixel value = `mask_id`. |
+| `/perception/sam3/status`            | `TrackingStatus`   | Session state at 2 Hz.                                                      |
 
-A tracking session runs until `/sam3/stop_tracking`, or until a new `/sam3/start_tracking` replaces it. Leases are
-off by default (`lease_enabled: false`): `lease_s` is ignored and `/sam3/renew_tracking` is a no-op. With
+A tracking session runs until `/perception/sam3/stop_tracking`, or until a new `/perception/sam3/start_tracking` replaces it. Leases are
+off by default (`lease_enabled: false`): `lease_s` is ignored and `/perception/sam3/renew_tracking` is a no-op. With
 `lease_enabled: true`, a session ends `lease_s` after the last start or renew, so a client that crashes cannot leave
 the GPU busy.
 
