@@ -1,0 +1,34 @@
+# BoxerNet 3D boxes for whichever detector is running: republishes its ObjectDetections with each object's 3D box
+# (pose + size). Lifts every detection frame: about 63 ms per frame on abra with the scene camera, GPU.
+# Needs depth registered to color (Orbbec: depth_registration: true) and TF from gravity_frame to the camera.
+# The first start exports and builds TensorRT engines into the volume (a few minutes); later starts reuse them.
+id: object_lifter_boxer
+implements: object_lifter
+tier: experimental
+kind: docker
+container:
+  image: ghcr.io/rammp-org/rammp-perception/boxer:main   # pin a release tag in a deployment
+  runtime: nvidia
+  network_mode: host
+  ipc: host
+  user: "1000:1000"
+  volumes:
+    - rammp_perception_engines:/cache/engines
+  environment:
+    ROS_DOMAIN_ID: "0"
+    HOME: /tmp
+params:
+  detections_topic: /perception/object_detections
+  image_topic: /scene_camera/color/image_raw
+  depth_topic: /scene_camera/depth/image_raw
+  camera_info_topic: /scene_camera/color/camera_info
+  gravity_frame: base_link   # any frame with +z up; only its rotation is used
+  min_prob: 0.5
+publishes: [/perception/object_detections_3d]
+subscribes:
+  - /perception/object_detections
+  - /scene_camera/color/image_raw
+  - /scene_camera/depth/image_raw
+  - /scene_camera/color/camera_info
+  - /tf
+  - /tf_static

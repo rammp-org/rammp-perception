@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>rammp_boxer</name>
+  <version>0.1.0</version>
+  <description>BoxerNet 3D boxes for any detector's ObjectDetections, from aligned depth and TF.</description>
+  <maintainer email="swapnil.pande98@gmail.com">Swapnil Pande</maintainer>
+  <license>Proprietary</license>
+  <exec_depend>rammp_detection_common</exec_depend>
+  <exec_depend>rammp_perception_interfaces</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <test_depend>python3-pytest</test_depend>
+  <export><build_type>ament_python</build_type></export>
+</package>
