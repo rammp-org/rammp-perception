@@ -1,0 +1,59 @@
+---
+title: Getting started
+---
+
+# Getting started
+
+Everything here runs on a Jetson AGX Orin on JetPack 6.2.1 (abra). The images are arm64 only.
+
+## Build
+
+From the repo root:
+
+```bash
+make build                                         # yoloe, rfdetr and sam3, tagged :dev
+make yoloe                                         # one image
+make yoloe INTERFACES=../rammp-interfaces-ros2     # against an unreleased interfaces checkout
+```
+
+Every Dockerfile builds from the repo root, because the images share `object_detection/common/` and `object_detection/config/`.
+
+## Run a scene segmenter by hand
+
+```bash
+docker run --rm --runtime nvidia --network host --ipc host \
+  -v rammp_perception_engines:/cache/engines \
+  ghcr.io/rammp-org/rammp-perception/yoloe:dev \
+  --ros-args -p model:=yoloe-26s-seg -p device:=dla0
+```
+
+On abra the bench keeps DDS on loopback. Pass its Cyclone config the way sheppy does, or the node discovers the
+camera topics but receives no frames:
+
+```bash
+C=/home/abra/.config/rammp-bench/cyclonedds-local.xml
+docker run ... -e CYCLONEDDS_URI=file://$C -v $C:$C:ro ...
+```
+
+The first start of a YOLOE configuration builds its TensorRT engine; the log says so and how long to expect.
+Once running, the node logs its rate, latency and objects per frame every 10 seconds.
+
+## Look at the output
+
+```bash
+ros2 topic hz /perception/object_detections
+ros2 topic echo --no-arr /perception/object_detections
+```
+
+`/perception/scene_segmenter/overlay/compressed` shows the masks on the camera frame in Foxglove or `rqt_image_view`.
+
+## Run it under sheppy
+
+Each `rammp-alternative.*.yaml` at the repo root is an alternative for a deployment manifest's `scene_segmenter`
+node (or the `sam3` node), with `scene_segmenter_mock` as the hardware-free stand-in. Copy the ones you want into
+the node's `alternatives:` list in rammp-deployments, then pick one in the profile.
+
+## Without a GPU
+
+`--ros-args -p mock:=true` loads no model and publishes empty results on the real topics. `make smoke` runs every
+detector image that way and checks it publishes and exits on SIGTERM.

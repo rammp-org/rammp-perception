@@ -1,0 +1,37 @@
+---
+title: Introduction
+---
+
+# Perception
+
+Object segmentation for RAMMP: which objects are in front of the robot, and which pixels are theirs. Two layers,
+each a ROS 2 node in its own image:
+
+| Layer | Image | What it does |
+| --- | --- | --- |
+| Always-on scene segmenter | `rammp-perception/yoloe` or `rammp-perception/rfdetr` | Masks for a fixed class list on every camera frame, at 10 Hz |
+| On-demand expert | `rammp-perception/sam3` | SAM3: high-quality detection for any text prompt, and leased tracking sessions |
+
+## One contract, three segmenters
+
+The scene segmenter has three interchangeable alternatives. They publish the same topics, the same message types
+and the same class names, so a sheppy profile switches between them without touching anything downstream.
+
+| Alternative | Runs on | Per frame on abra | GPU busy at 10 Hz | Notes |
+| --- | --- | --- | --- | --- |
+| `scene_segmenter_yoloe_gpu` | GPU | ~30 ms | ~12% | YOLOE-26m, the best YOLOE masks |
+| `scene_segmenter_yoloe_dla` | DLA core 0 | ~98 ms | ~2% | YOLOE-26s; frees the GPU for the planner |
+| `scene_segmenter_rfdetr` | GPU | ~39 ms | ~13% | RF-DETR-Seg S, COCO weights; cleanest masks, COCO classes only |
+
+The class list lives in one file, `object_detection/config/classes.yaml`, built into every image. Each class has a label (the only
+name any node publishes), the YOLOE prompts that find it, and the COCO classes RF-DETR reports as it.
+
+## Start here
+
+- **[Getting started](/rammp-perception/getting-started)**: build the images, run one on abra, and see its output.
+- **[Interface reference](/rammp-perception/interface)**: every topic, service and parameter, and the class list.
+
+## Licensing
+
+YOLOE and Ultralytics are AGPL-3.0. RF-DETR and its COCO weights are Apache-2.0. SAM3 is under Meta's SAM License.
+Check these before shipping an image outside the project.

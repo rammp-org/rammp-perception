@@ -1,0 +1,16 @@
+# Same topics and types, no model, no GPU, no camera: empty results at 10 Hz.
+id: scene_segmenter_mock
+implements: scene_segmenter
+tier: experimental
+kind: docker
+container:
+  image: ghcr.io/rammp-org/rammp-perception/yoloe:main
+  network_mode: host
+  ipc: host
+  user: "1000:1000"
+  environment:
+    ROS_DOMAIN_ID: "0"
+    HOME: /tmp
+params:
+  mock: true
+publishes: [/perception/object_detections]

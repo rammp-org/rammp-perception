@@ -1,0 +1,22 @@
+# RF-DETR-Seg S with COCO weights on the GPU (PyTorch FP16): about 39 ms per frame and 13% GPU at 10 Hz on abra.
+# Cleanest masks on the bench, but COCO classes
+# only: a class-list label with no `coco` entry (none today) is never reported.
+id: scene_segmenter_rfdetr
+implements: scene_segmenter
+tier: experimental
+kind: docker
+container:
+  image: ghcr.io/rammp-org/rammp-perception/rfdetr:main   # pin a release tag in a deployment
+  runtime: nvidia
+  network_mode: host
+  ipc: host
+  user: "1000:1000"
+  environment:
+    ROS_DOMAIN_ID: "0"
+    HOME: /tmp
+params:
+  model: small
+  image_topic: /scene_camera/color/image_raw
+  frame_stride: 3   # every 3rd camera frame: 10 Hz from the 30 fps scene camera
+publishes: [/perception/object_detections, /perception/scene_segmenter/overlay/compressed]
+subscribes: [/scene_camera/color/image_raw]

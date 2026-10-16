@@ -1,0 +1,21 @@
+# SAM3 on-demand expert detection and tracking sessions (services /perception/sam3/detect, .../start_tracking, ...).
+# Weights are gated on Hugging Face and not in the image: mount a snapshot of facebook/sam3 at /models/sam3.
+# TensorRT encoders are built once per machine into the sam3_engines volume (about 20 minutes, see object_detection/sam3/sam3.yaml);
+# without them the node runs the PyTorch encoders, slower with the same output.
+id: sam3
+tier: experimental
+kind: docker
+container:
+  image: ghcr.io/rammp-org/rammp-perception/sam3:main   # pin a release tag in a deployment
+  runtime: nvidia
+  network_mode: host
+  ipc: host
+  user: "1000:1000"
+  volumes:
+    - /home/abra/sam3-test/models/sam3:/models/sam3:ro
+    - sam3_engines:/cache/engines
+  environment:
+    ROS_DOMAIN_ID: "0"
+    HOME: /tmp
+publishes: [/perception/sam3/object_detections, /perception/sam3/status, /perception/sam3/overlay]
+subscribes: [/scene_camera/color/image_raw]

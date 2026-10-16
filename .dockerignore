@@ -1,0 +1,10 @@
+# Rename to `.dockerignore` in your module repo root.
+.git
+Dockerfile
+.dockerignore
+*.md
+**/__pycache__
+**/*.pyc
+build/
+install/
+log/
