@@ -2,6 +2,7 @@
 #   make build                 every image, tagged :dev
 #   make yoloe                 just one
 #   make yoloe INTERFACES=../rammp-interfaces-ros2   build against a local interfaces checkout
+#   HF_TOKEN=hf_... make sam3  sam3 bakes in the gated facebook/sam3 weights; the token is a BuildKit secret
 REGISTRY ?= ghcr.io/rammp-org/rammp-perception
 TAG ?= dev
 IMAGES := yoloe rfdetr sam3 boxer
@@ -13,7 +14,7 @@ SMOKE_IMAGES := yoloe rfdetr
 build: $(IMAGES)
 
 $(IMAGES): stage-interfaces
-	docker build -f object_detection/$@/Dockerfile -t $(REGISTRY)/$@:$(TAG) .
+	docker build $(if $(filter sam3,$@),--secret id=hf_token,env=HF_TOKEN) -f object_detection/$@/Dockerfile -t $(REGISTRY)/$@:$(TAG) .
 
 # Images build against the tagged rammp-interfaces-ros2 release unless INTERFACES names a checkout to stage.
 stage-interfaces:
