@@ -30,6 +30,9 @@ class ClassMap:
     coco_to_label: dict[str, str]
     min_scores: dict[str, float] = field(default_factory=dict)
     default_min_score: float = 0.25
+    # NanoOWL's thresholds: OWL-ViT scores run far lower than YOLOE's or RF-DETR's for the same object.
+    owl_min_scores: dict[str, float] = field(default_factory=dict)
+    default_owl_min_score: float = 0.2
 
     @classmethod
     def load(cls, path: str) -> ClassMap:
@@ -39,7 +42,8 @@ class ClassMap:
     @classmethod
     def from_dict(cls, doc: dict) -> ClassMap:
         default = float(doc.get("default_min_score", 0.25))
-        labels, prompts, coco, mins = [], {}, {}, {}
+        owl_default = float(doc.get("default_owl_min_score", 0.2))
+        labels, prompts, coco, mins, owl_mins = [], {}, {}, {}, {}
         for entry in doc["classes"]:
             label = entry["label"]
             if label in labels:
@@ -56,7 +60,8 @@ class ClassMap:
                         f"COCO class {c!r} maps to both {coco[c]!r} and {label!r}"
                     )
             mins[label] = float(entry.get("min_score", default))
-        return cls(labels, prompts, coco, mins, default)
+            owl_mins[label] = float(entry.get("owl_min_score", owl_default))
+        return cls(labels, prompts, coco, mins, default, owl_mins, owl_default)
 
     @property
     def prompts(self) -> list[str]:
