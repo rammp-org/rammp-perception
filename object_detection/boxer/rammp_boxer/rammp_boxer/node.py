@@ -18,6 +18,10 @@ The four input topics are parameters and can be changed at run time to move to a
   ros2 param set /perception/boxer detections_topic /perception/sam3/object_detections
 
 The frame published to is gravity_frame (base_link): any frame with +z up. Only its rotation is used.
+
+max_rate_hz (0: every detections message it keeps up with) caps how often it lifts, to leave GPU time to the rest of
+the robot: BoxerNet keeping up with a 10 Hz detector takes ~40% of an AGX Orin's GPU. A capped node lifts the newest
+detections when it is next due; the ones in between are not republished.
 """
 
 from __future__ import annotations
@@ -81,6 +85,7 @@ class BoxerNode(Node):
         self.gravity_frame = p("gravity_frame", "base_link")
         self.min_prob = float(p("min_prob", 0.5))
         self.depth_slop_ns = int(float(p("depth_slop_s", 0.02)) * 1e9)
+        self.max_rate_hz = float(p("max_rate_hz", 0.0))
         engine_dir = p("engine_dir", "/cache/engines")
 
         from .lifter import Lifter  # heavy: torch, TensorRT, Boxer
@@ -153,6 +158,8 @@ class BoxerNode(Node):
                 self.min_prob = float(prm.value)
             elif prm.name == "depth_slop_s":
                 self.depth_slop_ns = int(float(prm.value) * 1e9)
+            elif prm.name == "max_rate_hz":
+                self.max_rate_hz = float(prm.value)
         return SetParametersResult(successful=True)
 
     # Lifting, on a worker thread: always the newest detections, so a slow frame never builds a queue.
@@ -163,13 +170,20 @@ class BoxerNode(Node):
             self.ready.notify()
 
     def _loop(self) -> None:
+        last_start = 0.0
         while rclpy.ok() and not self.stopping.is_set():
+            # The rate cap is waited out before taking a message, so the one lifted is the newest.
+            if self.max_rate_hz > 0:
+                wait = last_start + 1.0 / self.max_rate_hz - time.monotonic()
+                if wait > 0 and self.stopping.wait(wait):
+                    return
             with self.ready:
                 if not self.ready.wait_for(
                     lambda: self.latest is not None, timeout=0.5
                 ):
                     continue
                 msg, self.latest = self.latest, None
+            last_start = time.monotonic()
             try:
                 self._process(msg)
             except Exception as e:  # noqa: BLE001 -- keep publishing; a dead worker looks healthy from outside

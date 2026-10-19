@@ -168,6 +168,7 @@ frame's stamp. Only that transform's rotation is used, for gravity.
 | `gravity_frame`     | `base_link`                        | any frame with +z up                                            |
 | `min_prob`          | `0.5`                              | BoxerNet confidence below which an object gets no pose          |
 | `depth_slop_s`      | `0.02`                             | how far apart in time a depth frame may be from its color frame |
+| `max_rate_hz`       | `0.0`                              | lift at most this often, newest detections first; 0: no cap    |
 | `output_topic`      | `/perception/object_detections_3d` | where to publish                                                |
 | `engine_dir`        | `/cache/engines`                   | TensorRT engine cache; mount a volume here                      |
 
