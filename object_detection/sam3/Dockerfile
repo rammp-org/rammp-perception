@@ -62,6 +62,9 @@ import rammp_sam3.node, rammp_sam3.engine, rammp_sam3.build_engines; \
 print('transformers', transformers.__version__, '/ torch', torch.__version__)"
 
 COPY object_detection/sam3/sam3.yaml /etc/rammp/sam3/sam3.yaml
+# World-writable so a fresh named volume mounted here is writable by the host user sheppy runs as. Without it a new
+# sam3_engines volume is root-owned and build_engines fails with Permission denied writing its ONNX file.
+RUN mkdir -p /cache/engines && chmod 1777 /cache/engines
 
 # The whole default invocation, so a deployment only appends: sheppy adds `--ros-args --params-file` for its
 # params block. Building engines uses the same image with the entrypoint swapped (see sam3.yaml).
