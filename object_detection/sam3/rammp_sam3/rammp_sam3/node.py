@@ -455,17 +455,18 @@ class Sam3Node(Node):
             time.sleep(0.05)
             return
         t0 = time.monotonic()
-        frame = self.frames.wait(s.topic, newer_than=s.last_frame, timeout=0.2)
-        if frame is None:
-            return
-        t1 = time.monotonic()
         # Rate cap: space step *starts* at least 1/max_rate apart, so a step that already takes longer than
-        # that never sleeps.
+        # that never sleeps. The cap is waited out before taking a frame, so the step tracks the newest frame
+        # rather than one that sat out the wait (at 5 Hz that added ~120 ms of camera-to-result latency).
         wait = (
-            (s.last_step_start + 1.0 / self.max_rate - t1) if s.last_step_start else 0
+            (s.last_step_start + 1.0 / self.max_rate - t0) if s.last_step_start else 0
         )
         if wait > 0:
             time.sleep(wait)
+        t1 = time.monotonic()
+        frame = self.frames.wait(s.topic, newer_than=s.last_frame, timeout=0.2)
+        if frame is None:
+            return
         t1s = time.monotonic()
         s.last_step_start = t1s
         due = (
@@ -498,8 +499,8 @@ class Sam3Node(Node):
         if self.timing_log_period > 0:
             self._log_timing(
                 {
-                    "wait_frame": t1 - t0,
-                    "rate_cap": t1s - t1,
+                    "rate_cap": t1 - t0,
+                    "wait_frame": t1s - t1,
                     "gpu": t2 - t1s,
                     "publish": t3 - t2,
                     "age": t3 - frame.received,
