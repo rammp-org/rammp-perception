@@ -57,6 +57,11 @@ RUN mkdir -p /models/yoloe \
 # Never pip-install or download at run time: what the image has is what runs.
 ENV YOLO_AUTOINSTALL=false YOLO_OFFLINE=true YOLO_CONFIG_DIR=/tmp/ultralytics
 
+# numpy's OpenBLAS starts a worker per core (11 here) that busy-waits between calls. Small per-frame matrix ops
+# (trackers, box geometry) wake the pool every frame: it kept ~5 cores busy at 10 Hz for ~40 ms of real work
+# (snorlax: YOLOE-26m 5.0 -> 0.32 cores, RF-DETR S 2.4 -> 0.4, same frame time). Matrices this small gain nothing.
+ENV OPENBLAS_NUM_THREADS=1
+
 # sheppy runs containers as the host user (1000), which has no passwd entry here. PyTorch names its compile cache
 # after the user and fails without one; give it a fixed directory instead.
 ENV TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor
