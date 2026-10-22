@@ -25,3 +25,11 @@ def test_empty_and_clear():
     c.put(1, "a")
     c.clear()
     assert c.nearest(1, 0) is None
+
+
+def test_newest():
+    c = FrameCache()
+    assert c.newest() is None
+    for t in (300, 100, 200):
+        c.put(t, t)
+    assert c.newest() == 300

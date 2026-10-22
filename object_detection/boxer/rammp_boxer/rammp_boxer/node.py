@@ -18,6 +18,8 @@ The four input topics are parameters and can be changed at run time to move to a
   ros2 param set /perception/boxer detections_topic /perception/sam3/object_detections
 
 The frame published to is gravity_frame (base_link): any frame with +z up. Only its rotation is used.
+
+frame_stride (1) lifts only every Nth detections message; the ones in between are not republished.
 """
 
 from __future__ import annotations
@@ -50,6 +52,7 @@ TOPICS = {
     "camera_info_topic": "/scene_camera/color/camera_info",
 }
 COLOR_WAIT_S = 0.2  # a detection can arrive before its color frame reaches this node; wait this long for it
+DEPTH_WAIT_S = 0.5  # and before its depth frame: the OAK's depth arrives ~240 ms after the color frame it goes with
 
 
 def stamp_ns(header) -> int:
@@ -81,6 +84,7 @@ class BoxerNode(Node):
         self.gravity_frame = p("gravity_frame", "base_link")
         self.min_prob = float(p("min_prob", 0.5))
         self.depth_slop_ns = int(float(p("depth_slop_s", 0.02)) * 1e9)
+        self.frame_stride, self.seen = max(1, int(p("frame_stride", 1))), 0
         engine_dir = p("engine_dir", "/cache/engines")
 
         from .lifter import Lifter  # heavy: torch, TensorRT, Boxer
@@ -153,11 +157,16 @@ class BoxerNode(Node):
                 self.min_prob = float(prm.value)
             elif prm.name == "depth_slop_s":
                 self.depth_slop_ns = int(float(prm.value) * 1e9)
+            elif prm.name == "frame_stride":
+                self.frame_stride = max(1, int(prm.value))
         return SetParametersResult(successful=True)
 
     # Lifting, on a worker thread: always the newest detections, so a slow frame never builds a queue.
 
     def _on_detections(self, msg: ObjectDetections) -> None:
+        self.seen += 1
+        if (self.seen - 1) % self.frame_stride:
+            return
         with self.ready:
             self.latest = msg
             self.ready.notify()
@@ -194,6 +203,15 @@ class BoxerNode(Node):
             time.sleep(0.01)
             color = self.colors.nearest(t, 0)
         depth = self.depths.nearest(t, self.depth_slop_ns)
+        deadline = time.monotonic() + DEPTH_WAIT_S
+        # wait for a match, until a depth frame past the slop window shows none is coming
+        while (
+            depth is None
+            and time.monotonic() < deadline
+            and (self.depths.newest() or 0) <= t + self.depth_slop_ns
+        ):
+            time.sleep(0.01)
+            depth = self.depths.nearest(t, self.depth_slop_ns)
         info = self.camera_info
         missing = [
             n
