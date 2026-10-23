@@ -52,7 +52,6 @@ TOPICS = {
     "camera_info_topic": "/scene_camera/color/camera_info",
 }
 COLOR_WAIT_S = 0.2  # a detection can arrive before its color frame reaches this node; wait this long for it
-DEPTH_WAIT_S = 0.5  # and before its depth frame: the OAK's depth arrives ~240 ms after the color frame it goes with
 
 
 def stamp_ns(header) -> int:
@@ -203,21 +202,19 @@ class BoxerNode(Node):
             time.sleep(0.01)
             color = self.colors.nearest(t, 0)
         depth = self.depths.nearest(t, self.depth_slop_ns)
-        deadline = time.monotonic() + DEPTH_WAIT_S
-        # wait for a match, until a depth frame past the slop window shows none is coming
-        while (
-            depth is None
-            and time.monotonic() < deadline
-            and (self.depths.newest() or 0) <= t + self.depth_slop_ns
-        ):
-            time.sleep(0.01)
-            depth = self.depths.nearest(t, self.depth_slop_ns)
+        # tells "nothing on the topic" apart from "depth not synced to color"
+        gap = self.depths.gap_ns(t)
+        depth_name = (
+            f"depth frame (nothing received on {self.topics['depth_topic']})"
+            if gap is None
+            else f"depth frame within depth_slop_s (nearest is {gap / 1e6:.0f} ms away)"
+        )
         info = self.camera_info
         missing = [
             n
             for n, v in (
                 ("color frame", color),
-                ("depth frame", depth),
+                (depth_name, depth),
                 ("camera_info", info),
             )
             if v is None

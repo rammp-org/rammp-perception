@@ -28,10 +28,10 @@ class FrameCache:
             best = min(self._frames, key=lambda s: abs(s - stamp_ns))
             return self._frames[best] if abs(best - stamp_ns) <= slop_ns else None
 
-    def newest(self) -> int | None:
-        """The newest stamp held, or None when empty."""
+    def gap_ns(self, stamp_ns: int) -> int | None:
+        """How far the closest message is from stamp_ns, or None when empty."""
         with self._lock:
-            return max(self._frames, default=None)
+            return min((abs(s - stamp_ns) for s in self._frames), default=None)
 
     def clear(self) -> None:
         with self._lock:

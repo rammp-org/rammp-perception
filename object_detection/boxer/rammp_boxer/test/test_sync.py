@@ -27,9 +27,10 @@ def test_empty_and_clear():
     assert c.nearest(1, 0) is None
 
 
-def test_newest():
+def test_gap():
     c = FrameCache()
-    assert c.newest() is None
-    for t in (300, 100, 200):
+    assert c.gap_ns(100) is None
+    for t in (100, 200, 300):
         c.put(t, t)
-    assert c.newest() == 300
+    assert c.gap_ns(230) == 30
+    assert c.gap_ns(500) == 200
