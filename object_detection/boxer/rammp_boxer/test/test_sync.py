@@ -25,3 +25,12 @@ def test_empty_and_clear():
     c.put(1, "a")
     c.clear()
     assert c.nearest(1, 0) is None
+
+
+def test_gap():
+    c = FrameCache()
+    assert c.gap_ns(100) is None
+    for t in (100, 200, 300):
+        c.put(t, t)
+    assert c.gap_ns(230) == 30
+    assert c.gap_ns(500) == 200

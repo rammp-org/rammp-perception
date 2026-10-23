@@ -18,6 +18,8 @@ The four input topics are parameters and can be changed at run time to move to a
   ros2 param set /perception/boxer detections_topic /perception/sam3/object_detections
 
 The frame published to is gravity_frame (base_link): any frame with +z up. Only its rotation is used.
+
+frame_stride (1) lifts only every Nth detections message; the ones in between are not republished.
 """
 
 from __future__ import annotations
@@ -81,6 +83,7 @@ class BoxerNode(Node):
         self.gravity_frame = p("gravity_frame", "base_link")
         self.min_prob = float(p("min_prob", 0.5))
         self.depth_slop_ns = int(float(p("depth_slop_s", 0.02)) * 1e9)
+        self.frame_stride, self.seen = max(1, int(p("frame_stride", 1))), 0
         engine_dir = p("engine_dir", "/cache/engines")
 
         from .lifter import Lifter  # heavy: torch, TensorRT, Boxer
@@ -142,6 +145,10 @@ class BoxerNode(Node):
             )
 
     def _on_parameters(self, params) -> SetParametersResult:
+        if any(prm.name == "frame_stride" and int(prm.value) < 1 for prm in params):
+            return SetParametersResult(
+                successful=False, reason="frame_stride must be at least 1"
+            )
         for prm in params:
             if prm.name in TOPICS:
                 self.topics[prm.name] = prm.value
@@ -153,11 +160,16 @@ class BoxerNode(Node):
                 self.min_prob = float(prm.value)
             elif prm.name == "depth_slop_s":
                 self.depth_slop_ns = int(float(prm.value) * 1e9)
+            elif prm.name == "frame_stride":
+                self.frame_stride = int(prm.value)
         return SetParametersResult(successful=True)
 
     # Lifting, on a worker thread: always the newest detections, so a slow frame never builds a queue.
 
     def _on_detections(self, msg: ObjectDetections) -> None:
+        self.seen += 1
+        if (self.seen - 1) % self.frame_stride:
+            return
         with self.ready:
             self.latest = msg
             self.ready.notify()
@@ -194,12 +206,19 @@ class BoxerNode(Node):
             time.sleep(0.01)
             color = self.colors.nearest(t, 0)
         depth = self.depths.nearest(t, self.depth_slop_ns)
+        # tells "nothing on the topic" apart from "depth not synced to color"
+        gap = self.depths.gap_ns(t)
+        depth_name = (
+            f"depth frame (nothing received on {self.topics['depth_topic']})"
+            if gap is None
+            else f"depth frame within depth_slop_s (nearest is {gap / 1e6:.0f} ms away)"
+        )
         info = self.camera_info
         missing = [
             n
             for n, v in (
                 ("color frame", color),
-                ("depth frame", depth),
+                (depth_name, depth),
                 ("camera_info", info),
             )
             if v is None
