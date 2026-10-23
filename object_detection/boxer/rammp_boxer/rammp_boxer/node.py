@@ -145,6 +145,10 @@ class BoxerNode(Node):
             )
 
     def _on_parameters(self, params) -> SetParametersResult:
+        if any(prm.name == "frame_stride" and int(prm.value) < 1 for prm in params):
+            return SetParametersResult(
+                successful=False, reason="frame_stride must be at least 1"
+            )
         for prm in params:
             if prm.name in TOPICS:
                 self.topics[prm.name] = prm.value
@@ -157,7 +161,7 @@ class BoxerNode(Node):
             elif prm.name == "depth_slop_s":
                 self.depth_slop_ns = int(float(prm.value) * 1e9)
             elif prm.name == "frame_stride":
-                self.frame_stride = max(1, int(prm.value))
+                self.frame_stride = int(prm.value)
         return SetParametersResult(successful=True)
 
     # Lifting, on a worker thread: always the newest detections, so a slow frame never builds a queue.
