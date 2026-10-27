@@ -7,7 +7,7 @@ Every node runs in the `/perception` namespace.
 
 ## Scene segmenter
 
-Every alternative (`yoloe` on GPU or DLA, `rfdetr`) runs the same node from `rammp_detection_common`, as
+Every alternative (`yoloe` on GPU or DLA, `rfdetr`, `nanoowl`) runs the same node from `rammp_detection_common`, as
 `/perception/scene_segmenter`. Detections go to `/perception/object_detections`, not under the node's name, so
 consumers do not depend on which segmenter is running.
 
@@ -28,8 +28,8 @@ Subscribed:
 
 Every header is the camera frame's header, so `stamp` and `frame_id` match the image the result came from.
 Ids are tracked: an object keeps its `instance_id` (`<class>_<n>`, e.g. `microwave_2`) and `mask_id` from frame to frame while the backend's tracker holds it.
-YOLOE tracks with Ultralytics' built-in BoT-SORT (`model.track`), RF-DETR with Roboflow's `trackers` ByteTrack, the
-pairing Roboflow recommends. A new object gets an id once it has been seen on consecutive frames; an object lost
+YOLOE tracks with Ultralytics' built-in BoT-SORT (`model.track`), RF-DETR and NanoOWL with Roboflow's `trackers`
+ByteTrack, the pairing Roboflow recommends. A new object gets an id once it has been seen on consecutive frames; an object lost
 for more than `track_buffer_frames` processed frames is dropped and gets a new id if it comes back. When two prompts or COCO classes of
 one label fire on one object, it keeps the older id. `state` is always `STATE_VISIBLE`, and `has_pose` false: [BoxerNet](#boxernet-3d-boxes) adds 3D boxes on its own topic. Ids run 1 to
 65535 and wrap. Where masks overlap, the higher-scoring instance owns the pixel.
@@ -72,6 +72,18 @@ RF-DETR (`rammp-perception/rfdetr`):
 | Parameter | Default | Meaning                                            |
 | --------- | ------- | -------------------------------------------------- |
 | `model`   | `small` | COCO RF-DETR-Seg size: `nano`, `small` or `medium` |
+
+NanoOWL (`rammp-perception/nanoowl`):
+
+| Parameter    | Default          | Meaning                                                                     |
+| ------------ | ---------------- | --------------------------------------------------------------------------- |
+| `model`      | `owlvit-b32`     | `owlvit-b32`, or `owlvit-b16`: smaller objects, about 4x the GPU time       |
+| `nms_iou`    | `0.3`            | within a label, a box overlapping a higher-scoring one this much is dropped |
+| `engine_dir` | `/cache/engines` | TensorRT engine cache; mount a volume here                                  |
+
+NanoOWL gives boxes only: an object's region in the label image is its box. It uses the class list's YOLOE prompts
+and its own thresholds, `owl_min_score` (OWL-ViT scores run far lower than YOLOE's). The node builds its TensorRT
+engine at first start (about 2 minutes, per model, GPU and TensorRT version); `ros2 run rammp_nanoowl build_engine --model owlvit-b32` builds it ahead of time, as for YOLOE.
 
 ## The class list
 

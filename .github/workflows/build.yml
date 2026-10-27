@@ -36,6 +36,7 @@ jobs:
           (cd object_detection/common/rammp_detection_common && python -m pytest test -v)
           (cd object_detection/sam3/rammp_sam3 && python -m pytest test -v)
           (cd object_detection/boxer/rammp_boxer && python -m pytest test -v)
+          (cd object_detection/nanoowl/rammp_nanoowl && python -m pytest test -v)
 
       - name: Validate the fragments
         run: python3 scripts/validate_fragment.py rammp-alternative*.yaml
@@ -51,6 +52,8 @@ jobs:
           - image: yoloe
             smoke: true
           - image: rfdetr
+            smoke: true
+          - image: nanoowl
             smoke: true
           # Needs a GPU and gated weights to run at all; the Dockerfile's import check is its test.
           - image: sam3

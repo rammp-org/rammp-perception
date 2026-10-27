@@ -1,0 +1,25 @@
+# NanoOWL (OWL-ViT B/32, TensorRT FP16) on the GPU: boxes only, about 9 ms per frame on abra.
+# The first start builds a TensorRT engine into the volume (about 2 minutes); later starts reuse it.
+# Same topics as every other scene_segmenter alternative, so they swap without touching consumers.
+id: scene_segmenter_nanoowl
+implements: scene_segmenter
+tier: experimental
+kind: docker
+container:
+  image: ghcr.io/rammp-org/rammp-perception/nanoowl:main   # pin a release tag in a deployment
+  runtime: nvidia
+  network_mode: host
+  ipc: host
+  user: "1000:1000"
+  volumes:
+    - rammp_perception_engines:/cache/engines
+  environment:
+    ROS_DOMAIN_ID: "0"
+    HOME: /tmp
+params:
+  model: owlvit-b32
+  nms_iou: 0.3
+  image_topic: /scene_camera/color/image_raw
+  frame_stride: 3   # every 3rd camera frame: 10 Hz from the 30 fps scene camera
+publishes: [/perception/object_detections, /perception/scene_segmenter/overlay/compressed]
+subscribes: [/scene_camera/color/image_raw]
