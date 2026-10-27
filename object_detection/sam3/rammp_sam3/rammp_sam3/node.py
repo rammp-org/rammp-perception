@@ -455,19 +455,29 @@ class Sam3Node(Node):
             time.sleep(0.05)
             return
         t0 = time.monotonic()
-        frame = self.frames.wait(s.topic, newer_than=s.last_frame, timeout=0.2)
+        # Rate cap: steps are due 1/max_rate apart, so a step that already takes longer than that never
+        # sleeps. The cap is waited out before taking a frame, so the step never tracks a frame that sat out
+        # the wait (at 5 Hz that added ~120 ms of camera-to-result latency).
+        period = 1.0 / self.max_rate
+        due_at = s.last_step_start + period if s.last_step_start else 0.0
+        if due_at > t0:
+            time.sleep(due_at - t0)
+        t1 = time.monotonic()
+        # On time, take the first frame received after the step was due, not the buffered one, which has aged
+        # up to a whole camera period (~35 ms less camera-to-result latency at 15 fps). A late step (the last
+        # one overran) takes the newest frame.
+        on_time = t1 - due_at < 0.01
+        frame = self.frames.wait(
+            s.topic,
+            newer_than=max(s.last_frame, due_at) if on_time else s.last_frame,
+            timeout=0.2,
+        )
         if frame is None:
             return
-        t1 = time.monotonic()
-        # Rate cap: space step *starts* at least 1/max_rate apart, so a step that already takes longer than
-        # that never sleeps.
-        wait = (
-            (s.last_step_start + 1.0 / self.max_rate - t1) if s.last_step_start else 0
-        )
-        if wait > 0:
-            time.sleep(wait)
         t1s = time.monotonic()
-        s.last_step_start = t1s
+        # On time, the next step is due one period after this one was, so waiting for the frame doesn't push
+        # the rate under the cap. Late, the period counts from now, so a stall is not caught up in a burst.
+        s.last_step_start = due_at if on_time else t1s
         due = (
             s.redetect_period_s > 0
             and time.monotonic() - s.last_detect >= s.redetect_period_s
@@ -498,8 +508,8 @@ class Sam3Node(Node):
         if self.timing_log_period > 0:
             self._log_timing(
                 {
-                    "wait_frame": t1 - t0,
-                    "rate_cap": t1s - t1,
+                    "rate_cap": t1 - t0,
+                    "wait_frame": t1s - t1,
                     "gpu": t2 - t1s,
                     "publish": t3 - t2,
                     "age": t3 - frame.received,

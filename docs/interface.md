@@ -161,17 +161,18 @@ frame's stamp. Only that transform's rotation is used, for gravity.
 
 ### Parameters
 
-| Parameter           | Default                            | Meaning                                                         |
-| ------------------- | ---------------------------------- | --------------------------------------------------------------- |
-| `detections_topic`  | `/perception/object_detections`    | the detector to lift                                            |
-| `image_topic`       | `/scene_camera/color/image_raw`    | the color frames those detections came from                     |
-| `depth_topic`       | `/scene_camera/depth/image_raw`    | depth registered to the color frames                            |
-| `camera_info_topic` | `/scene_camera/color/camera_info`  | the color camera's intrinsics                                   |
-| `gravity_frame`     | `base_link`                        | any frame with +z up                                            |
-| `min_prob`          | `0.5`                              | BoxerNet confidence below which an object gets no pose          |
-| `depth_slop_s`      | `0.02`                             | how far apart in time a depth frame may be from its color frame |
-| `output_topic`      | `/perception/object_detections_3d` | where to publish                                                |
-| `engine_dir`        | `/cache/engines`                   | TensorRT engine cache; mount a volume here                      |
+| Parameter           | Default                            | Meaning                                                                        |
+| ------------------- | ---------------------------------- | ------------------------------------------------------------------------------ |
+| `detections_topic`  | `/perception/object_detections`    | the detector to lift                                                           |
+| `image_topic`       | `/scene_camera/color/image_raw`    | the color frames those detections came from                                    |
+| `depth_topic`       | `/scene_camera/depth/image_raw`    | depth registered to the color frames                                           |
+| `camera_info_topic` | `/scene_camera/color/camera_info`  | the color camera's intrinsics                                                  |
+| `gravity_frame`     | `base_link`                        | any frame with +z up                                                           |
+| `min_prob`          | `0.5`                              | BoxerNet confidence below which an object gets no pose                         |
+| `depth_slop_s`      | `0.02`                             | how far apart in time a depth frame may be from its color frame                |
+| `frame_stride`      | `1`                                | lift every Nth detections message; stacks on the detector's own `frame_stride` |
+| `output_topic`      | `/perception/object_detections_3d` | where to publish                                                               |
+| `engine_dir`        | `/cache/engines`                   | TensorRT engine cache; mount a volume here                                     |
 
 The four input topics can change at run time, to lift another detector or camera without a restart:
 

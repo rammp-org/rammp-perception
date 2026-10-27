@@ -50,6 +50,11 @@ RUN git clone https://github.com/facebookresearch/boxer.git /opt/boxer \
     done
 ENV BOXER_ROOT=/opt/boxer BOXER_COMMIT=${BOXER_COMMIT}
 
+# numpy's OpenBLAS starts a worker per core (11 here) that busy-waits between calls. Small per-frame matrix ops
+# (trackers, box geometry) wake the pool every frame: it kept ~5 cores busy at 10 Hz for ~40 ms of real work
+# (snorlax: YOLOE-26m 5.0 -> 0.32 cores, RF-DETR S 2.4 -> 0.4, same frame time). Matrices this small gain nothing.
+ENV OPENBLAS_NUM_THREADS=1
+
 COPY --from=interfaces /rammp_perception_interfaces /module_ws/src/rammp_perception_interfaces
 COPY object_detection/common/rammp_detection_common /module_ws/src/rammp_detection_common
 COPY object_detection/boxer/rammp_boxer /module_ws/src/rammp_boxer
