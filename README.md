@@ -2,15 +2,16 @@
 
 Object segmentation for RAMMP, as ROS 2 nodes in Docker images run by sheppy:
 
-| Image                                       | Role                                          | Runs on                                |
-| ------------------------------------------- | --------------------------------------------- | -------------------------------------- |
-| `ghcr.io/rammp-org/rammp-perception/yoloe`  | always-on scene segmenter, YOLOE              | GPU, or a DLA core with `device: dla0` |
-| `ghcr.io/rammp-org/rammp-perception/rfdetr` | always-on scene segmenter, RF-DETR-Seg (COCO) | GPU                                    |
-| `ghcr.io/rammp-org/rammp-perception/sam3`   | on-demand expert detection and tracking, SAM3 | GPU                                    |
+| Image                                        | Role                                           | Runs on                                |
+| -------------------------------------------- | ---------------------------------------------- | -------------------------------------- |
+| `ghcr.io/rammp-org/rammp-perception/yoloe`   | always-on scene segmenter, YOLOE               | GPU, or a DLA core with `device: dla0` |
+| `ghcr.io/rammp-org/rammp-perception/rfdetr`  | always-on scene segmenter, RF-DETR-Seg (COCO)  | GPU                                    |
+| `ghcr.io/rammp-org/rammp-perception/nanoowl` | always-on scene detector, NanoOWL (boxes only) | GPU                                    |
+| `ghcr.io/rammp-org/rammp-perception/sam3`    | on-demand expert detection and tracking, SAM3  | GPU                                    |
 
 Every detector publishes one detection message, `rammp_perception_interfaces/ObjectDetections`: the objects
 (`instance_id` like `microwave_2`, stable while tracked, class, score, box) plus one mono16 label image of
-their masks. The three scene segmenter alternatives (YOLOE on the GPU, YOLOE on the DLA, RF-DETR) publish it on
+their masks. The scene segmenter alternatives (YOLOE on the GPU, YOLOE on the DLA, RF-DETR, NanoOWL) publish it on
 the same topic with the same class names, so a sheppy profile swaps between them:
 
 | Topic                                            | Type                                           | Publisher                                                 |
@@ -33,6 +34,7 @@ object_detection/
   common/rammp_detection_common  class list, duplicate merging, and the node every segmenter runs in
   yoloe/                         rammp_yoloe package and Dockerfile
   rfdetr/                        rammp_rfdetr package and Dockerfile
+  nanoowl/                       rammp_nanoowl package and Dockerfile
   sam3/                          rammp_sam3 package, Dockerfile and default parameters
 interfaces/                      staging for an unreleased rammp_perception_interfaces (gitignored)
 rammp-alternative.*.yaml         sheppy alternatives for rammp-deployments

@@ -7,10 +7,13 @@
 # coco       RF-DETR-Seg COCO class names reported as this label. A label with no COCO class is never
 #            reported by RF-DETR.
 # min_score  per-class detection threshold; default_min_score otherwise.
+# owl_min_score  NanoOWL's per-class threshold; default_owl_min_score otherwise. OWL-ViT scores run far lower.
 #
 # Changing prompts or adding a class rebuilds the YOLOE engine on the next start (a few minutes).
 
 default_min_score: 0.25
+# Best overall F1 for both OWL-ViT B/32 and B/16 on the 2026-10-19 eval (21 images, SAM3 reference).
+default_owl_min_score: 0.2
 
 classes:
   - label: food container

@@ -123,3 +123,17 @@ def test_track_ids_map_into_the_label_image_range():
     assert track_id_to_instance_id(0) == 1
     assert track_id_to_instance_id(MAX_ID - 1) == MAX_ID
     assert track_id_to_instance_id(MAX_ID) == 1
+
+
+def test_owl_thresholds_are_separate():
+    classes = ClassMap.from_dict(
+        {
+            "default_owl_min_score": 0.12,
+            "classes": [
+                {"label": "microwave"},
+                {"label": "table", "min_score": 0.15, "owl_min_score": 0.08},
+            ],
+        }
+    )
+    assert classes.owl_min_scores == {"microwave": 0.12, "table": 0.08}
+    assert classes.min_score("table") == 0.15
