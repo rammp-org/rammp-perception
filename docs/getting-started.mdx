@@ -47,6 +47,43 @@ ros2 topic echo --no-arr /perception/object_detections
 
 `/perception/scene_segmenter/overlay/compressed` shows the masks on the camera frame in Foxglove or `rqt_image_view`.
 
+## Run the odom3d tracker by hand
+
+odom3d sits between the scene segmenter and `/perception/object_detections`; see the
+[interface reference](/rammp-perception/interface#odom3d-tracker). Build both images with `make rfdetr odom3d`: the
+rfdetr image needs a build that carries `classes_tracking.yaml`. Run the segmenter with low thresholds, without its
+own tracker, publishing on the raw topic:
+
+```bash
+docker run --rm --runtime nvidia --network host --ipc host \
+  ghcr.io/rammp-org/rammp-perception/rfdetr:dev \
+  --ros-args -p classes_file:=/etc/rammp/perception/classes_tracking.yaml -p tracking:=false \
+  -r /perception/object_detections:=/perception/object_detections_raw
+```
+
+Then odom3d. It needs depth registered to the color frames, the color camera's `camera_info`, and TF from `odom`
+to the camera at image stamps. Point `depth_topic` at the camera's registered depth. Set `camera_extrinsic` only if
+the TF tree has no `base_link` → camera link (the value below is the flatbot's):
+
+```bash
+docker run --rm --network host --ipc host --user 1000:1000 -e HOME=/tmp \
+  ghcr.io/rammp-org/rammp-perception/odom3d:dev \
+  --ros-args -p depth_topic:=/scene_camera/depth/image_raw \
+  -p "camera_extrinsic:=[0.8257, -0.2643, 0.9228, -0.5316, 0.5441, -0.4426, 0.4747]"
+```
+
+Pass both the bench's Cyclone config, as for the segmenter above. To check it:
+
+```bash
+ros2 topic hz /perception/object_detections_raw   # the segmenter, at its frame_stride rate
+ros2 topic hz /perception/object_detections       # odom3d, at the camera's rate
+ros2 run tf2_ros tf2_echo odom base_link          # odometry must be live
+```
+
+odom3d logs every 10 seconds: input and output rates, update and render times, live tracks, and what it had to
+skip (no TF, no depth for a detection). `/perception/odom3d/markers` shows the tracked 3D boxes in RViz or Foxglove,
+with `odom` as the fixed frame.
+
 ## Run it under sheppy
 
 Each `rammp-alternative.*.yaml` at the repo root is an alternative for a deployment manifest's `scene_segmenter`
