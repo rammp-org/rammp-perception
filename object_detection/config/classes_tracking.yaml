@@ -1,0 +1,35 @@
+# The class list a segmenter uses when it feeds the odom3d tracker (object_detection/odom3d) instead of publishing
+# for consumers directly: same labels as classes.yaml, but
+#   * low thresholds: odom3d needs the weak detections to keep tracks alive (it starts tracks only from
+#     confident ones, ByteTrack-style). On the flatbot bags, 0.10 instead of 0.25 removed the last id switch.
+#   * "tv": COCO RF-DETR calls the black bench fridge "tv" from some angles. odom3d uses a tv only as evidence
+#     for a fridge-shaped, floor-standing object (never as a tv), so this label never reaches consumers.
+# Run the segmenter with classes_file pointing here and tracking: false; see docs/interface.md, "odom3d tracker".
+
+default_min_score: 0.10
+
+classes:
+  - label: food container
+    prompts: [bowl, food container, plastic food container, tupperware, lunch box]
+    coco: [bowl]
+
+  - label: drink cup
+    prompts: [cup, mug, drink cup, glass]
+    coco: [cup, wine glass]
+
+  - label: fridge
+    prompts: [refrigerator, fridge]
+    coco: [refrigerator]
+
+  - label: microwave
+    prompts: [microwave]
+    coco: [microwave]
+
+  - label: table
+    prompts: [table, dining table]
+    coco: [dining table]
+
+  - label: tv
+    prompts: [tv]
+    coco: [tv]
+    min_score: 0.30

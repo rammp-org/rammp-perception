@@ -7,6 +7,7 @@ Object segmentation for RAMMP, as ROS 2 nodes in Docker images run by sheppy:
 | `ghcr.io/rammp-org/rammp-perception/yoloe`  | always-on scene segmenter, YOLOE              | GPU, or a DLA core with `device: dla0` |
 | `ghcr.io/rammp-org/rammp-perception/rfdetr` | always-on scene segmenter, RF-DETR-Seg (COCO) | GPU                                    |
 | `ghcr.io/rammp-org/rammp-perception/sam3`   | on-demand expert detection and tracking, SAM3 | GPU                                    |
+| `ghcr.io/rammp-org/rammp-perception/odom3d` | stable object ids from depth and odometry     | CPU                                    |
 
 Every detector publishes one detection message, `rammp_perception_interfaces/ObjectDetections`: the objects
 (`instance_id` like `microwave_2`, stable while tracked, class, score, box) plus one mono16 label image of
@@ -18,6 +19,8 @@ the same topic with the same class names, so a sheppy profile swaps between them
 | `/perception/object_detections`                  | `rammp_perception_interfaces/ObjectDetections` | the scene segmenter, always on; the Orchestrator reads it |
 | `/perception/sam3/object_detections`             | `rammp_perception_interfaces/ObjectDetections` | SAM3, during a tracking session                           |
 | `/perception/scene_segmenter/overlay/compressed` | `sensor_msgs/CompressedImage`                  | masks drawn on the frame, for viewing                     |
+| `/perception/object_detections_raw`              | `rammp_perception_interfaces/ObjectDetections` | the scene segmenter, when odom3d republishes it           |
+| `/perception/odom3d/markers`                     | `visualization_msgs/MarkerArray`               | odom3d's 3D boxes in `odom`, for viewing                  |
 
 The class list (food container, drink cup, fridge, microwave, table) and the prompts and COCO classes behind each
 label are in [`object_detection/config/classes.yaml`](object_detection/config/classes.yaml).
@@ -30,10 +33,12 @@ the [interface reference](docs/interface.md).
 ```
 object_detection/
   config/classes.yaml            the shared class list, built into every image
+  config/classes_tracking.yaml   the same labels with low thresholds, for a segmenter that feeds odom3d
   common/rammp_detection_common  class list, duplicate merging, and the node every segmenter runs in
   yoloe/                         rammp_yoloe package and Dockerfile
   rfdetr/                        rammp_rfdetr package and Dockerfile
   sam3/                          rammp_sam3 package, Dockerfile and default parameters
+  odom3d/                        rammp_odom3d package and Dockerfile: world-anchored tracking for stable ids
 interfaces/                      staging for an unreleased rammp_perception_interfaces (gitignored)
 rammp-alternative.*.yaml         sheppy alternatives for rammp-deployments
 ```
