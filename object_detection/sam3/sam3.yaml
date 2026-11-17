@@ -1,16 +1,15 @@
-# Defaults for the SAM3 node. Run it, with the weights and the engine cache mounted:
+# Defaults for the SAM3 node. Run it, with the engine cache mounted (the weights are in the image):
 #
-#   docker run --rm -it --runtime nvidia --network host --ipc host \
-#     -v /path/to/sam3:/models/sam3:ro -v sam3_engines:/cache/engines \
+#   docker run --rm -it --runtime nvidia --network host --ipc host -v sam3_engines:/cache/engines \
 #     ghcr.io/rammp-org/rammp-perception/sam3:<tag>
 #
 # Build the TensorRT engines into the same volume, once per machine (about 20 minutes on an AGX Orin):
 #
-#   docker run --rm --runtime nvidia -v /path/to/sam3:/models/sam3:ro -v sam3_engines:/cache/engines \
+#   docker run --rm --runtime nvidia -v sam3_engines:/cache/engines \
 #     --entrypoint /ros_entrypoint.sh ghcr.io/rammp-org/rammp-perception/sam3:<tag> \
 #     ros2 run rammp_sam3 build_engines
 #
-# /path/to/sam3 is a Hugging Face snapshot of facebook/sam3 (config.json, model.safetensors, tokenizer files).
+# To run other weights, mount a Hugging Face snapshot (config.json, model.safetensors, tokenizer files) over /models/sam3.
 /**:
   ros__parameters:
     model_path: /models/sam3

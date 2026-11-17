@@ -55,7 +55,7 @@ make check                                       # validate the sheppy fragments
 make smoke                                       # each segmenter image publishes in mock mode and exits on SIGTERM
 ```
 
-`rammp_perception_interfaces` comes from rammp-interfaces-ros2 at `INTERFACES_REF` (default `v1.2.0`) until a
-`rammp-cuda` release carries it.
+`rammp_perception_interfaces` comes from rammp-interfaces-ros2 at `INTERFACES_REF` (default `v2.1.0`, the release
+the `rammp-cuda:2.2.0-jp6` base compiles in), unless a checkout is staged into `interfaces/`.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the branch and PR workflow.

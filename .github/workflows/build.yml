@@ -13,9 +13,9 @@ permissions:
   packages: write
 
 env:
-  # rammp-interfaces-ros2 ref that carries rammp_perception_interfaces. A branch, not a release, until
-  # interfaces tags one: these are test images.
-  INTERFACES_REF: dev
+  # rammp-interfaces-ros2 release that carries rammp_perception_interfaces: the one rammp-cuda:2.2.0-jp6
+  # compiles in, so the images' overlay matches the base's copy.
+  INTERFACES_REF: v2.1.0
 
 jobs:
   fragment:
@@ -53,7 +53,8 @@ jobs:
             smoke: true
           - image: rfdetr
             smoke: true
-          # Needs a GPU and gated weights to run at all; the Dockerfile's import check is its test.
+          # Needs a GPU to run at all; the Dockerfile's import check is its test. Bakes in the gated weights,
+          # downloaded with the HF_TOKEN secret (an account that accepted the SAM License); keep its package private.
           - image: sam3
             smoke: false
           # Needs a GPU and a camera stream to do anything; the Dockerfile's import check is its test.
@@ -94,6 +95,13 @@ jobs:
           file: object_detection/${{ matrix.image }}/Dockerfile
           platforms: linux/arm64
           build-args: INTERFACES_REF=${{ env.INTERFACES_REF }}
+          # Only sam3 mounts it; the other Dockerfiles never see it.
+          secrets: |
+            hf_token=${{ secrets.HF_TOKEN }}
+          # Registry cache, so unchanged layers (sam3's 3.3 GB weights) keep their digests and hosts don't re-pull
+          # them. It lives in the image's own package (sam3's stays private). PR runs aren't logged in: no cache.
+          cache-from: ${{ github.event_name != 'pull_request' && format('type=registry,ref=ghcr.io/{0}/{1}:buildcache', steps.repo.outputs.name, matrix.image) || '' }}
+          cache-to: ${{ github.event_name != 'pull_request' && format('type=registry,ref=ghcr.io/{0}/{1}:buildcache,mode=max', steps.repo.outputs.name, matrix.image) || '' }}
           load: true
           tags: |
             rammp-perception-${{ matrix.image }}:ci
@@ -104,8 +112,17 @@ jobs:
         if: matrix.smoke
         run: ./scripts/smoke.sh rammp-perception-${{ matrix.image }}:ci
 
+      # Same build, all cached: buildx pushes the cached layer blobs as they are, so their digests carry over.
       - name: Push
         if: github.event_name != 'pull_request'
-        env:
-          TAGS: ${{ steps.meta.outputs.tags }}
-        run: echo "$TAGS" | xargs -n1 docker push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: object_detection/${{ matrix.image }}/Dockerfile
+          platforms: linux/arm64
+          build-args: INTERFACES_REF=${{ env.INTERFACES_REF }}
+          secrets: |
+            hf_token=${{ secrets.HF_TOKEN }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
