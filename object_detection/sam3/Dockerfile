@@ -2,8 +2,13 @@
 # SAM3 open-vocabulary detection and tracking. Jetson Orin only: FROM rammp-cuda, run with --runtime nvidia.
 # Build from the repo root: docker build -f object_detection/sam3/Dockerfile .
 #
+# The facebook/sam3 weights (3.3 GB) are baked in at /models/sam3. They are gated on Hugging Face, so the build
+# needs a token from an account that accepted the SAM License, passed as a BuildKit secret (never in a layer):
+#   HF_TOKEN=hf_... docker build --secret id=hf_token,env=HF_TOKEN -f object_detection/sam3/Dockerfile .
+# The SAM License limits redistribution: keep the published image private. A snapshot mounted at /models/sam3
+# still takes precedence over the baked one.
+#
 # Deliberately not in the image:
-#   * weights. facebook/sam3 is gated on Hugging Face and 3.4 GB. Mount a downloaded snapshot at /models/sam3.
 #   * TensorRT engines. They are specific to the GPU and the TensorRT version, so they are built once per machine
 #     into a volume at /cache/engines (see sam3.yaml). Without them the node runs the PyTorch encoders: slower,
 #     same output.
@@ -39,6 +44,14 @@ RUN curl -fsSL https://repo.download.nvidia.com/jetson/jetson-ota-public.asc -o 
 RUN pip install --no-cache-dir \
       transformers==5.19.0 tokenizers==0.23.2 huggingface-hub==1.33.0 safetensors==0.8.0 \
       onnx==1.23.2 onnxscript==0.7.2 numpy==1.26.4
+
+# Pinned to a revision of the gated repo; sam3.pt (the original checkpoint, 3.3 GB again) is not used.
+ARG SAM3_REVISION=3c879f39826c281e95690f02c7821c4de09afae7
+RUN --mount=type=secret,id=hf_token,required=true \
+    HF_TOKEN="$(cat /run/secrets/hf_token)" hf download facebook/sam3 --revision "${SAM3_REVISION}" \
+      --local-dir /models/sam3 --exclude sam3.pt --exclude .gitattributes \
+ && rm -rf /models/sam3/.cache \
+ && test -s /models/sam3/model.safetensors
 
 # numpy's OpenBLAS starts a worker per core (11 here) that busy-waits between calls. Small per-frame matrix ops
 # (trackers, box geometry) wake the pool every frame: it kept ~5 cores busy at 10 Hz for ~40 ms of real work

@@ -52,7 +52,8 @@ jobs:
             smoke: true
           - image: rfdetr
             smoke: true
-          # Needs a GPU and gated weights to run at all; the Dockerfile's import check is its test.
+          # Needs a GPU to run at all; the Dockerfile's import check is its test. Bakes in the gated weights,
+          # downloaded with the HF_TOKEN secret (an account that accepted the SAM License); keep its package private.
           - image: sam3
             smoke: false
           # Needs a GPU and a camera stream to do anything; the Dockerfile's import check is its test.
@@ -90,6 +91,9 @@ jobs:
           file: object_detection/${{ matrix.image }}/Dockerfile
           platforms: linux/arm64
           build-args: INTERFACES_REF=${{ env.INTERFACES_REF }}
+          # Only sam3 mounts it; the other Dockerfiles never see it.
+          secrets: |
+            hf_token=${{ secrets.HF_TOKEN }}
           load: true
           tags: |
             rammp-perception-${{ matrix.image }}:ci

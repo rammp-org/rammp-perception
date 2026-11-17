@@ -119,12 +119,14 @@ through ROS on abra with TensorRT encoders and a 1280x720 camera:
 | Track 7 objects                         | 8.3 Hz, ~145 ms frame-to-publish  |
 | Startup (weights cached, engines built) | ~12 s                             |
 
-The image carries neither the weights nor the TensorRT engines. Mount a Hugging Face snapshot of the gated
-`facebook/sam3` repo at `/models/sam3`, and build the engines once per machine into a volume (about 8 minutes on
-an AGX Orin; engines already current are skipped):
+The image carries the weights of the gated `facebook/sam3` repo at `/models/sam3`, so it stays private (the SAM
+License limits redistribution); a snapshot mounted there takes precedence. Building it needs a Hugging Face token
+from an account that accepted the license: `HF_TOKEN=hf_... make sam3`, and the `HF_TOKEN` secret in CI. The
+TensorRT engines are not in the image: build them once per machine into a volume (about 8 minutes on an AGX Orin;
+engines already current are skipped):
 
 ```bash
-docker run --rm --runtime nvidia -v /path/to/sam3:/models/sam3:ro -v sam3_engines:/cache/engines \
+docker run --rm --runtime nvidia -v sam3_engines:/cache/engines \
   --entrypoint /ros_entrypoint.sh ghcr.io/rammp-org/rammp-perception/sam3:<tag> \
   ros2 run rammp_sam3 build_engines
 ```
