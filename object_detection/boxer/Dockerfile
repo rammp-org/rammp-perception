@@ -9,9 +9,9 @@
 
 # rammp_perception_interfaces: rammp-interfaces-ros2 at INTERFACES_REF, unless a checkout was staged into
 # interfaces/ (gitignored) to build against unreleased changes: `make boxer INTERFACES=../rammp-interfaces-ros2`.
-FROM ghcr.io/rammp-org/rammp-cuda:1.1.0-jp6 AS interfaces
-# A branch until rammp-interfaces-ros2 tags a release with the perception package.
-ARG INTERFACES_REF=dev
+FROM ghcr.io/rammp-org/rammp-cuda:2.1.0-jp6 AS interfaces
+# The release rammp-cuda:2.1.0-jp6 compiles in, so this overlay matches the base's copy.
+ARG INTERFACES_REF=v2.0.0
 COPY interfaces /staged
 RUN if [ -d /staged/rammp_perception_interfaces ]; then \
       echo "using staged rammp_perception_interfaces" && cp -r /staged/rammp_perception_interfaces /rammp_perception_interfaces; \
@@ -20,7 +20,7 @@ RUN if [ -d /staged/rammp_perception_interfaces ]; then \
       && mv /src/rammp_perception_interfaces /rammp_perception_interfaces; \
     fi
 
-FROM ghcr.io/rammp-org/rammp-cuda:1.1.0-jp6
+FROM ghcr.io/rammp-org/rammp-cuda:2.1.0-jp6
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
