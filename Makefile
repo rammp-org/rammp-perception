@@ -13,8 +13,9 @@ SMOKE_IMAGES := yoloe rfdetr
 
 build: $(IMAGES)
 
+sam3: BUILD_FLAGS = --secret id=hf_token,env=HF_TOKEN
 $(IMAGES): stage-interfaces
-	docker build $(if $(filter sam3,$@),--secret id=hf_token,env=HF_TOKEN) -f object_detection/$@/Dockerfile -t $(REGISTRY)/$@:$(TAG) .
+	docker build $(BUILD_FLAGS) -f object_detection/$@/Dockerfile -t $(REGISTRY)/$@:$(TAG) .
 
 # Images build against the tagged rammp-interfaces-ros2 release unless INTERFACES names a checkout to stage.
 stage-interfaces:
