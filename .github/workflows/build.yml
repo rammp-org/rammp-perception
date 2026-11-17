@@ -13,9 +13,9 @@ permissions:
   packages: write
 
 env:
-  # rammp-interfaces-ros2 release that carries rammp_perception_interfaces: the one rammp-cuda:2.1.0-jp6
+  # rammp-interfaces-ros2 release that carries rammp_perception_interfaces: the one rammp-cuda:2.2.0-jp6
   # compiles in, so the images' overlay matches the base's copy.
-  INTERFACES_REF: v2.0.0
+  INTERFACES_REF: v2.1.0
 
 jobs:
   fragment:
