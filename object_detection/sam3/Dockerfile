@@ -10,9 +10,9 @@
 
 # The interface package: the tagged release, unless a checkout was staged into interfaces/ (gitignored) to build
 # against unreleased changes: `make sam3 INTERFACES=../rammp-interfaces-ros2`.
-FROM ghcr.io/rammp-org/rammp-cuda:2.1.0-jp6 AS interfaces
-# The release rammp-cuda:2.1.0-jp6 compiles in, so this overlay matches the base's copy.
-ARG INTERFACES_REF=v2.0.0
+FROM ghcr.io/rammp-org/rammp-cuda:2.2.0-jp6 AS interfaces
+# The release rammp-cuda:2.2.0-jp6 compiles in, so this overlay matches the base's copy.
+ARG INTERFACES_REF=v2.1.0
 COPY interfaces /staged
 RUN if [ -d /staged/rammp_perception_interfaces ]; then \
       echo "using staged rammp_perception_interfaces" && cp -r /staged/rammp_perception_interfaces /rammp_perception_interfaces; \
@@ -21,7 +21,7 @@ RUN if [ -d /staged/rammp_perception_interfaces ]; then \
       && mv /src/rammp_perception_interfaces /rammp_perception_interfaces; \
     fi
 
-FROM ghcr.io/rammp-org/rammp-cuda:2.1.0-jp6
+FROM ghcr.io/rammp-org/rammp-cuda:2.2.0-jp6
 
 # TensorRT 10.3 runtime and Python bindings, as JetPack 6.2.1 ships them (L4T r36.4). Runtime only: engines are
 # built through the Python API, so no trtexec or headers.
