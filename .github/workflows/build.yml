@@ -28,7 +28,7 @@ jobs:
           python-version: "3.10"
 
       - name: Install test dependencies
-        run: pip install pyyaml pytest numpy
+        run: pip install pyyaml pytest numpy scipy
 
       - name: Unit tests
         run: |
@@ -36,6 +36,7 @@ jobs:
           (cd object_detection/common/rammp_detection_common && python -m pytest test -v)
           (cd object_detection/sam3/rammp_sam3 && python -m pytest test -v)
           (cd object_detection/boxer/rammp_boxer && python -m pytest test -v)
+          (cd object_detection/odom3d/rammp_odom3d && python -m pytest test -v)
 
       - name: Validate the fragments
         run: python3 scripts/validate_fragment.py rammp-alternative*.yaml
@@ -58,6 +59,9 @@ jobs:
             smoke: false
           # Needs a GPU and a camera stream to do anything; the Dockerfile's import check is its test.
           - image: boxer
+            smoke: false
+          # Needs detections, depth and TF to do anything; the Dockerfile's import check and unit tests are its test.
+          - image: odom3d
             smoke: false
     steps:
       - uses: actions/checkout@v4

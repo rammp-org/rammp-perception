@@ -1,0 +1,38 @@
+# odom3d: stable object ids and camera-rate boxes for the UI. Sits between the scene segmenter and every consumer of
+# /perception/object_detections: the segmenter (classes_tracking.yaml, tracking: false) is remapped to publish on
+# /perception/object_detections_raw, and this node publishes the tracked objects on /perception/object_detections
+# at camera rate (15 Hz on flatbot) with boxes re-projected from wheel odometry between detections.
+# On the flatbot bags (RF-DETR S at 5 Hz): 1 id per physical object and 0 id switches over ~50 s each, vs 11-12 ids
+# per object and 127-131 switches for the deployed ByteTrack; CPU only, ~4 ms per detection, <1 ms per frame.
+# Needs depth registered to color, and TF odom <- camera at image stamps (or camera_extrinsic, see below).
+id: object_tracker_odom3d
+implements: object_tracker
+tier: experimental
+kind: docker
+container:
+  image: ghcr.io/rammp-org/rammp-perception/odom3d:main   # pin a release tag in a deployment
+  network_mode: host
+  ipc: host
+  user: "1000:1000"
+  environment:
+    ROS_DOMAIN_ID: "0"
+    HOME: /tmp
+params:
+  detections_topic: /perception/object_detections_raw
+  depth_topic: /scene_camera/depth/image_rect_raw
+  camera_info_topic: /scene_camera/color/camera_info
+  output_topic: /perception/object_detections
+  odom_frame: odom
+  base_frame: base_link
+  # Optical frame in base_link [x y z qx qy qz qw], only while the TF tree has no base_link -> camera link.
+  # Flatbot value, fitted on the 2026-11-10 bags (RGB-D visual odometry against wheel odometry); refit it after
+  # moving the camera, or drop it once the URDF links base_link to the camera.
+  camera_extrinsic: [0.8257, -0.2643, 0.9228, -0.5316, 0.5441, -0.4426, 0.4747]
+  publish_out_of_view: false
+publishes: [/perception/object_detections, /perception/odom3d/markers]
+subscribes:
+  - /perception/object_detections_raw
+  - /scene_camera/depth/image_rect_raw
+  - /scene_camera/color/camera_info
+  - /tf
+  - /tf_static

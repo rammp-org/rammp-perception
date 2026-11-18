@@ -192,3 +192,87 @@ docker run --rm --runtime nvidia -v rammp_perception_engines:/cache/engines \
   --entrypoint /ros_entrypoint.sh ghcr.io/rammp-org/rammp-perception/boxer:<tag> \
   ros2 run rammp_boxer build_engines
 ```
+
+## odom3d tracker
+
+`rammp-perception/odom3d`, node `/perception/odom3d`. It gives the scene segmenter's objects ids that stay put. The
+segmenter's own tracker (ByteTrack or BoT-SORT) matches boxes in the image. On a chair that turns in place, a box
+moves too far between detections to match, and a lost object returns under a new id. odom3d tracks each object
+where it is in the room instead: in the `odom` frame. The demo objects do not move, so once an object is on the
+map, only the camera's pose is needed to know where it is in the image, and wheel odometry gives that.
+
+For each detection it reads the registered depth under the object's mask, lifts it into `odom` and matches it to the
+tracked objects of the same class group (`fridge`, `microwave`, `table`, `food container` with `drink cup`). The
+cost is the 3D gap to the object's extent plus the overlap with its projected box. A label flip within a group does
+not change an id. A new object needs 3 detections over at least 0.3 s, one of them confident, and a plausible size
+and height for its class: a fridge stands on the floor and is over 0.45 m tall, a table top is 0.35 to 1.25 m high.
+An object out of view or behind something is kept, and gets its old id back when it is seen again. Every camera
+frame, each object's box is drawn from the camera's current pose, so boxes follow the objects while the chair turns,
+and the detector's latency is made up for.
+
+### Wiring
+
+The segmenter runs with `classes_file: /etc/rammp/perception/classes_tracking.yaml` (the same labels with
+thresholds of 0.10, plus `tv`, which only ever counts as evidence for a fridge-shaped object) and `tracking: false`,
+and is remapped to publish on `/perception/object_detections_raw`. odom3d then publishes on
+`/perception/object_detections`, so consumers do not change:
+
+```yaml
+# scene_segmenter: rfdetr
+params:
+  classes_file: /etc/rammp/perception/classes_tracking.yaml
+  tracking: false
+command: [--ros-args, -r, /perception/object_detections:=/perception/object_detections_raw]
+# object_tracker: odom3d, see rammp-alternative.odom3d.yaml
+```
+
+Its output is the segmenter's message with these differences:
+
+- one message per camera frame (`camera_info_topic`), not per processed frame;
+- `instance_id` is `<label>_<track id>` and stable for the whole run;
+- `state` is `STATE_VISIBLE` with the re-projected box, or `STATE_OCCLUDED` with a zero box for an object in view
+  behind something (and, with `publish_out_of_view`, for one out of view);
+- `has_pose` is true: `pose` and `size` are the object's gravity-aligned 3D box in the camera's optical frame;
+- masks are not re-projected: `mask_id` is 0 and `label_image` is empty.
+
+It needs depth registered to the color frame, the color camera's intrinsics, and TF `odom_frame` ← camera at image
+stamps. If the TF tree has no `base_frame` → camera link, set `camera_extrinsic` and only `odom_frame` ←
+`base_frame` is looked up. The camera's lever arm matters: with the camera wrongly placed at `base_link`, ids per
+object went from 1.0 to 1.4–2.2 on the flatbot bags.
+
+### Topics
+
+| Topic                        | Type                                           | Notes                                                           |
+| ---------------------------- | ---------------------------------------------- | --------------------------------------------------------------- |
+| `output_topic`               | `rammp_perception_interfaces/ObjectDetections` | published: tracked objects, every camera frame                  |
+| `/perception/odom3d/markers` | `visualization_msgs/MarkerArray`               | published: tracked 3D boxes in `odom_frame`                     |
+| `detections_topic`           | `rammp_perception_interfaces/ObjectDetections` | subscribed; masks from `label_image` when present, else the box |
+| `depth_topic`                | `sensor_msgs/Image`                            | subscribed; `16UC1` (mm) or `32FC1` (m), registered to color    |
+| `camera_info_topic`          | `sensor_msgs/CameraInfo`                       | subscribed; the color camera's, one output message each         |
+| `/tf`, `/tf_static`          | `tf2_msgs/TFMessage`                           | subscribed                                                      |
+
+### Parameters
+
+| Parameter             | Default                              | Meaning                                                                      |
+| --------------------- | ------------------------------------ | ---------------------------------------------------------------------------- |
+| `detections_topic`    | `/perception/object_detections_raw`  | the segmenter's detections                                                   |
+| `depth_topic`         | `/scene_camera/depth/image_rect_raw` | depth registered to the color frames                                         |
+| `camera_info_topic`   | `/scene_camera/color/camera_info`    | the color camera's intrinsics                                                |
+| `output_topic`        | `/perception/object_detections`      | where to publish                                                             |
+| `markers_topic`       | `/perception/odom3d/markers`         | where to publish the 3D boxes                                                |
+| `odom_frame`          | `odom`                               | the world-fixed frame objects are tracked in                                 |
+| `base_frame`          | `base_link`                          | the robot frame `camera_extrinsic` is given in                               |
+| `camera_extrinsic`    | unset                                | `[x, y, z, qx, qy, qz, qw]` of the optical frame in `base_frame`; unset = TF |
+| `publish_out_of_view` | `false`                              | also publish remembered objects outside the image, as `STATE_OCCLUDED`       |
+| `render_stride`       | `1`                                  | publish every Nth camera frame                                               |
+| `depth_slop_s`        | `0.02`                               | how far apart in time a depth frame may be from its detections               |
+| `tf_wait_s`           | `0.08`                               | how long to wait for odometry at a frame's stamp before using the newest     |
+| `sensor_qos`          | `sensor_data`                        | `reliable` for bag playback                                                  |
+| `tracker_params`      | empty                                | YAML overrides of `rammp_odom3d.core.DEFAULTS`                               |
+| `label_kinds`         | empty                                | YAML overrides of the label → class group map                                |
+
+Measured on the flatbot bags (2026-11-10, two runs of about 50 s, RF-DETR-Seg S at 5 Hz): 1 id per object and 0 id
+switches, against 11–12 ids per object and 127–131 switches for the segmenter's ByteTrack, and boxes that overlap
+the current frame's detection by IoU 0.93 against 0.72–0.76. On a desktop CPU it takes about 5 ms per detection
+message and under 1 ms per camera frame, about 17% of one core in all, and publishes 50–55 ms (p50) after the
+camera stamp. It logs these numbers every 10 s.

@@ -85,6 +85,8 @@ import rammp_yoloe.node, rammp_yoloe.engine; \
 print('ultralytics', ultralytics.__version__)"
 
 COPY object_detection/config/classes.yaml /etc/rammp/perception/classes.yaml
+# Used instead (classes_file) when the segmenter feeds the odom3d tracker: low thresholds, plus tv.
+COPY object_detection/config/classes_tracking.yaml /etc/rammp/perception/classes_tracking.yaml
 # World-writable so a fresh named volume mounted here is writable by the host user sheppy runs as.
 RUN mkdir -p /cache/engines && chmod 1777 /cache/engines
 

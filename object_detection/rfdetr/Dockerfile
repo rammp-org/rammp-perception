@@ -71,6 +71,8 @@ import rammp_rfdetr.node; \
 print('rfdetr ok')"
 
 COPY object_detection/config/classes.yaml /etc/rammp/perception/classes.yaml
+# Used instead (classes_file) when the segmenter feeds the odom3d tracker: low thresholds, plus tv.
+COPY object_detection/config/classes_tracking.yaml /etc/rammp/perception/classes_tracking.yaml
 
 # The node binary itself, not `ros2 run`, so SIGTERM reaches it (see the yoloe Dockerfile).
 ENTRYPOINT ["/ros_entrypoint.sh", "/module_ws/install/rammp_rfdetr/lib/rammp_rfdetr/rfdetr_node"]
