@@ -233,6 +233,9 @@ Its output is the segmenter's message with these differences:
 - `state` is `STATE_VISIBLE` with the re-projected box, or `STATE_OCCLUDED` with a zero box for an object in view
   behind something (and, with `publish_out_of_view`, for one out of view);
 - `has_pose` is true: `pose` and `size` are the object's gravity-aligned 3D box in the camera's optical frame;
+  the box is turned about the vertical to the heading of the object's own vertical faces (fridge, microwave,
+  table, once seen enough), of the large object a small one stands on or in, or else of the room's walls, all
+  estimated from depth. Headings are mod 90 degrees, so `size` x and y can swap meaning between objects;
 - masks are not re-projected: `mask_id` is 0 and `label_image` is empty.
 
 It needs depth registered to the color frame, the color camera's intrinsics, and TF `odom_frame` ← camera at image

@@ -83,6 +83,23 @@ DEFAULTS = dict(
     depth_band={"fridge": 0.6, "microwave": 0.35, "table": 1.0, "small": 0.12},
     max_size={"fridge": 1.4, "microwave": 0.8, "table": 2.5, "small": 0.45},
     max_range_m=5.0,
+    # orientation: a large object takes the heading of its own vertical faces once its histogram has
+    # yaw_min_mass normals and a peak yaw_min_ratio x the mean; otherwise (and for small objects not standing on a
+    # large one) the room's heading from all vertical surfaces; with neither, the odom axes.
+    yaw_min_mass=400,
+    yaw_min_ratio=2.0,
+    yaw_decay=0.99,  # per matched measurement
+    room_min_mass=3000,
+    room_min_ratio=1.5,
+    room_decay=0.998,  # per detector frame
+    room_alpha=0.1,  # low-pass on the room heading; the last confident value holds while the peak is weak
+    pts_keep={
+        "fridge": 30,
+        "microwave": 30,
+        "table": 30,
+        "small": 1,
+    },  # measurements' points kept per track
+    pts_per_meas=300,
 )
 
 
@@ -160,6 +177,89 @@ def lift_points(mask, depth_mm, K, box=None, erode=2, step=2, zmax=5.0):
     return np.stack([(uu - K[0, 2]) * z / K[0, 0], (vv - K[1, 2]) * z / K[1, 1], z], 1)
 
 
+# ----------------------------------------------------------------------------- orientation
+# Boxes are gravity-aligned and turn only about odom z. Kitchens are close to "Manhattan" (walls, cabinets and
+# appliances square to each other), so a box's heading is only defined mod 90 deg. It is estimated from the
+# directions of the vertical surfaces seen in depth: per object from its own faces, and for the whole room from
+# the full image. Histograms hold the heading mod 90 in 1 deg bins.
+YAW_BINS = 90
+
+
+def vertical_face_yaws(
+    depth_mm, K, R_oc, mask=None, box=None, step=2, s=3, zlim=(0.3, 4.0)
+):
+    """Headings mod 90 deg (degrees, odom frame) of the vertical surfaces in depth, from finite-difference normals
+    (s px baseline) sampled every `step` px; restricted to `mask` (and the `box` crop) if given."""
+    x0 = y0 = 0
+    D = depth_mm
+    if box is not None:
+        H, W = depth_mm.shape
+        x0, y0 = max(int(box[0]), 0), max(int(box[1]), 0)
+        x1, y1 = min(int(np.ceil(box[2])) + 1, W), min(int(np.ceil(box[3])) + 1, H)
+        D = depth_mm[y0:y1, x0:x1]
+        if mask is not None:
+            mask = mask[y0:y1, x0:x1]
+    H_, W_ = D.shape
+    if H_ <= 2 * s + 1 or W_ <= 2 * s + 1:
+        return np.zeros(0)
+    z = np.asarray(D, dtype=np.float64) / 1000.0
+    R_, C_ = np.meshgrid(
+        np.arange(s, H_ - s, step), np.arange(s, W_ - s, step), indexing="ij"
+    )
+
+    def lift(r, c):
+        zz = z[r, c]
+        return np.stack(
+            [(c + x0 - K[0, 2]) * zz / K[0, 0], (r + y0 - K[1, 2]) * zz / K[1, 1], zz],
+            -1,
+        )
+
+    dx = lift(R_, C_ + s) - lift(R_, C_ - s)
+    dy = lift(R_ + s, C_) - lift(R_ - s, C_)
+    zc = z[R_, C_]
+    ok = (zc > zlim[0]) & (zc < zlim[1])
+    for zz in (z[R_, C_ + s], z[R_, C_ - s], z[R_ + s, C_], z[R_ - s, C_]):
+        ok &= zz > 0
+    # not across a depth edge
+    ok &= (np.abs(dx[..., 2]) < 0.1 * zc) & (np.abs(dy[..., 2]) < 0.1 * zc)
+    if mask is not None:
+        ok &= np.asarray(mask)[R_, C_]
+    n = np.cross(dx[ok], dy[ok])
+    nn = np.linalg.norm(n, axis=1)
+    n = n[nn > 1e-9] / nn[nn > 1e-9, None]
+    no = n @ np.asarray(R_oc).T
+    no = no[np.abs(no[:, 2]) < 0.25]  # vertical surfaces only
+    return np.degrees(np.arctan2(no[:, 1], no[:, 0])) % 90.0
+
+
+def yaw_histogram(yaws_deg):
+    idx = np.minimum(np.asarray(yaws_deg).astype(int), YAW_BINS - 1)
+    return np.bincount(idx, minlength=YAW_BINS).astype(np.float64)
+
+
+def yaw_peak(hist, min_mass, min_ratio):
+    """Heading (rad, in [-45, 45) deg) at the peak of a mod-90 histogram, or None if it is weak."""
+    if hist is None or hist.sum() < min_mass:
+        return None
+    w = 7
+    sm = np.convolve(
+        np.r_[hist[-(w // 2) :], hist, hist[: w // 2]], np.ones(w), "valid"
+    )
+    i = int(np.argmax(sm))
+    if sm[i] < min_ratio * sm.mean():
+        return None
+    a, b, c = sm[i - 1], sm[i], sm[(i + 1) % YAW_BINS]
+    den = a - 2 * b + c
+    off = 0.5 * (a - c) / den if den < 0 else 0.0  # parabolic sub-bin peak
+    deg = (i + 0.5 + off + 45.0) % 90.0 - 45.0
+    return float(np.radians(deg))
+
+
+def rot2(yaw):
+    c, s = np.cos(yaw), np.sin(yaw)
+    return np.array([[c, -s], [s, c]])
+
+
 # ----------------------------------------------------------------------------- tracker
 class Track:
     __slots__ = (
@@ -180,6 +280,8 @@ class Track:
         "score",
         "max_score",
         "label_shown",
+        "yaw_hist",
+        "pts",
     )
 
     @property
@@ -201,6 +303,9 @@ class Odom3DTracker:
                 self.p[k] = v
         self.tracks: list[Track] = []
         self.next_id = 1
+        self.room_hist = np.zeros(YAW_BINS)
+        self._room_yaw = None
+        self._rng = np.random.default_rng(0)
 
     # ------------------------------------------------------------ measurements
     def _measure(self, d, depth_mm, T_oc):
@@ -261,11 +366,21 @@ class Odom3DTracker:
                 size=np.maximum(hi - lo, 0.03),
                 z=float(np.median(P[:, 2])),
                 bottom=float(lo[2]),
+                pts=Po
+                if len(Po) <= self.p["pts_per_meas"]
+                else Po[
+                    self._rng.choice(len(Po), self.p["pts_per_meas"], replace=False)
+                ],
+                yaw_hist=yaw_histogram(
+                    vertical_face_yaws(depth_mm, self.K, T_oc[:3, :3], mask, b)
+                )
+                if g in LARGE
+                else None,
             )
             if (
                 np.max(m["size"]) > self.p["max_size"][g]
             ):  # gross lift failure -> 2D-only measurement
-                m.update(c=None, size=None, lo=None, hi=None)
+                m.update(c=None, size=None, lo=None, hi=None, pts=None, yaw_hist=None)
         m["birth_ok"] = m["c"] is not None and self._plausible(m)
         if m["c"] is None and d["kind"] == "tv":
             return None  # a tv we cannot place in 3D is never evidence for a fridge
@@ -352,6 +467,19 @@ class Odom3DTracker:
         p = self.p
         T_oc = np.asarray(T_odom_cam, dtype=np.float64)
         T_co = np.linalg.inv(T_oc)
+        if depth_mm is not None:  # room heading from every vertical surface in view
+            self.room_hist = self.p["room_decay"] * self.room_hist + yaw_histogram(
+                vertical_face_yaws(depth_mm, self.K, T_oc[:3, :3], step=6)
+            )
+            y = yaw_peak(self.room_hist, p["room_min_mass"], p["room_min_ratio"])
+            if y is not None:
+                if self._room_yaw is None:
+                    self._room_yaw = y
+                else:  # step along the shorter way round mod 90 deg
+                    d = (y - self._room_yaw + np.pi / 4) % (np.pi / 2) - np.pi / 4
+                    self._room_yaw = (
+                        self._room_yaw + p["room_alpha"] * d + np.pi / 4
+                    ) % (np.pi / 2) - np.pi / 4
         # 2D NMS per class group before the 3D lift (table top + whole table, microwave window + microwave)
         cand = sorted(
             (
@@ -475,6 +603,10 @@ class Odom3DTracker:
         tr.bb = self._billboard(m["box"], m["z"], T_oc)
         tr.p_exist, tr.hits, tr.first_t, tr.last_hit_t = 0.5, 1, t, t
         tr.hist = {}
+        tr.pts = [m["pts"]]
+        tr.yaw_hist = (
+            m["yaw_hist"].copy() if m["yaw_hist"] is not None else np.zeros(YAW_BINS)
+        )
         self._vote(tr, m)
         tr.confirmed, tr.score, tr.label_shown = False, m["score"], None
         tr.max_score = m["score"] if m["kind"] != "tv" else 0.0
@@ -506,6 +638,9 @@ class Odom3DTracker:
                 arr += np.where(outward, 0.1 if m["partial"] else 0.3, 0.03) * (
                     new - arr
                 )
+            tr.pts = (tr.pts + [m["pts"]])[-p["pts_keep"][tr.group] :]
+            if m["yaw_hist"] is not None:
+                tr.yaw_hist = p["yaw_decay"] * tr.yaw_hist + m["yaw_hist"]
             z = m["z"]
         else:
             z = float(transform(T_co, tr.c[None])[0, 2])
@@ -577,6 +712,8 @@ class Odom3DTracker:
                         np.minimum(keep.lo, rm.lo),
                         np.maximum(keep.hi, rm.hi),
                     )
+                    keep.pts = (rm.pts + keep.pts)[-self.p["pts_keep"][keep.group] :]
+                    keep.yaw_hist = keep.yaw_hist + rm.yaw_hist
                     drop.add(rm.id)
         for t_ in self.tracks:  # tentative tracks sitting on a confirmed one
             if t_.confirmed or t_.id in drop:
@@ -603,42 +740,91 @@ class Odom3DTracker:
             tr.label_shown = best  # hysteresis: a new label must clearly win
         return tr.label_shown
 
+    # ------------------------------------------------------------ orientation
+    def room_yaw(self):
+        """Room heading in odom (rad, mod 90 deg), or None before the first confident estimate."""
+        return self._room_yaw
+
+    def _fit(self, tr, yaw):
+        """(centre, size) of the box with heading yaw around the track's kept points (robust percentiles)."""
+        P = np.concatenate(tr.pts)
+        m = P[:, :2].mean(0)
+        local = (P[:, :2] - m) @ rot2(yaw)  # rows: R(yaw)^T q
+        lo, hi = np.percentile(local, [4, 96], axis=0)
+        zlo, zhi = np.percentile(P[:, 2], [4, 96])
+        c = np.r_[m + rot2(yaw) @ ((lo + hi) / 2), (zlo + zhi) / 2]
+        return c, np.maximum(np.r_[hi - lo, zhi - zlo], 0.03)
+
+    def boxes(self, tracks=None):
+        """tid -> (centre in odom, size along the box axes, heading in odom [rad]) for confirmed tracks.
+        Large objects: own faces, else the room. Small objects: the large object they stand on/in, else the room.
+        Small objects keep the filtered centre (they can be carried); large ones are fit to their kept points."""
+        tracks = [
+            t for t in (tracks if tracks is not None else self.tracks) if t.confirmed
+        ]
+        room = self.room_yaw()
+        room = 0.0 if room is None else room
+        out = {}
+        for tr in tracks:
+            if tr.group not in LARGE:
+                continue
+            yaw = yaw_peak(tr.yaw_hist, self.p["yaw_min_mass"], self.p["yaw_min_ratio"])
+            yaw = room if yaw is None else yaw
+            c, size = self._fit(tr, yaw) if tr.pts else (tr.c, tr.size)
+            out[tr.id] = (c, size, yaw)
+        for tr in tracks:
+            if tr.group in LARGE:
+                continue
+            yaw = room
+            _, size0 = self._fit(tr, room) if tr.pts else (None, tr.size)
+            bottom = tr.c[2] - size0[2] / 2
+            best = None
+            for sid, (sc, ss, sy) in out.items():
+                q = np.abs(rot2(sy).T @ (tr.c[:2] - sc[:2]))
+                top = sc[2] + ss[2] / 2
+                if np.all(q < ss[:2] / 2 + 0.05) and bottom > top - 0.15 - ss[2]:
+                    # on (or inside) it; the lowest-lying support wins over e.g. a fridge behind
+                    if best is None or abs(bottom - top) < best[0]:
+                        best = (abs(bottom - top), sy)
+            if best is not None:
+                yaw = best[1]
+            size = self._fit(tr, yaw)[1] if tr.pts else tr.size
+            out[tr.id] = (tr.c.copy(), size, yaw)
+        return out
+
     # ------------------------------------------------------------ output
     def render(self, t, T_odom_cam, depth_mm=None, include_out_of_view=False):
         """Objects to show in the camera frame at stamp t: list of dict(tid, label, box, score, state,
-        pos_odom, size, pos_cam). state is "visible" (in view; box valid), "occluded" (in view behind something)
-        or, with include_out_of_view, "out_of_view" (remembered, live, not in the image; box meaningless)."""
+        pos_odom, size, yaw, pos_cam). state is "visible" (in view; box valid), "occluded" (in view behind something)
+        or, with include_out_of_view, "out_of_view" (remembered, live, not in the image; box meaningless).
+        The 3D box is centred at pos_odom, gravity-aligned and turned by yaw (rad) about odom z; size is along
+        its own axes (x along yaw, y along yaw + 90 deg, z up)."""
         T_co = np.linalg.inv(np.asarray(T_odom_cam, dtype=np.float64))
+        shown = [
+            tr for tr in self.tracks if tr.confirmed and tr.p_exist >= self.p["show_p"]
+        ]
+        bx = self.boxes()
         out = []
-        for tr in self.tracks:
-            if not tr.confirmed or tr.p_exist < self.p["show_p"]:
-                continue
+        for tr in shown:
             box, in_view, occ, _ = self._visibility(tr, T_co, depth_mm)
             if box is None or not in_view:
-                if include_out_of_view:
-                    out.append(
-                        dict(
-                            tid=tr.id,
-                            label=self.label(tr),
-                            box=np.zeros(4),
-                            score=float(tr.score),
-                            state="out_of_view",
-                            pos_odom=tr.c.copy(),
-                            pos_cam=transform(T_co, tr.c[None])[0],
-                            size=tr.size.copy(),
-                        )
-                    )
-                continue
+                if not include_out_of_view:
+                    continue
+                box, state = np.zeros(4), "out_of_view"
+            else:
+                box, state = self._clip(box), "occluded" if occ else "visible"
+            c, size, yaw = bx[tr.id]
             out.append(
                 dict(
                     tid=tr.id,
                     label=self.label(tr),
-                    box=self._clip(box),
+                    box=box,
                     score=float(tr.score),
-                    state="occluded" if occ else "visible",
-                    pos_odom=tr.c.copy(),
-                    pos_cam=transform(T_co, tr.c[None])[0],
-                    size=tr.size.copy(),
+                    state=state,
+                    pos_odom=np.asarray(c, dtype=np.float64).copy(),
+                    pos_cam=transform(T_co, np.asarray(c)[None])[0],
+                    size=np.asarray(size, dtype=np.float64).copy(),
+                    yaw=float(yaw),
                 )
             )
         return out

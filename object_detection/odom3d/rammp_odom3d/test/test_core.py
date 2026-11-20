@@ -177,3 +177,36 @@ def test_ghost_behind_object_is_suppressed(stride):
             tr.update(t, T, D, dets)
     confirmed = [x for x in tr.tracks if x.confirmed]
     assert len(confirmed) == 1
+
+
+def test_boxes_take_the_heading_of_their_faces():
+    """Scene square to a 'room' frame turned 25 deg from odom: the boxes come out turned 25 deg (mod 90) with their
+    real widths, and a cup on the table takes the table's heading."""
+    th = np.radians(-25.0)
+    c, s = np.cos(th), np.sin(th)
+    R_or = np.eye(4)
+    R_or[:2, :2] = [[c, -s], [s, c]]  # room -> odom
+    cup = (np.array([1.7, -0.1, 0.75]), np.array([1.78, -0.02, 0.85]))
+    scene = [FRIDGE, MICROWAVE, TABLE, cup]
+    kinds = ["refrigerator", "microwave", "dining table", "cup"]
+    tr = Odom3DTracker(K, W, H)
+    for k, t, yaw in sweep(150, amp=0.6):
+        T_room = T_odom_cam(yaw)
+        D, objs = render_scene(T_room, scene)
+        if k % 3 == 0:
+            dets = [
+                dict(kind=kinds[n], score=0.8, box=ob[0], mask=ob[1])
+                for n, ob in enumerate(objs)
+                if ob is not None
+            ]
+            tr.update(t, R_or @ T_room, D, dets)
+    bx = tr.boxes()
+    by_label = {tr.label(x): bx[x.id] for x in tr.tracks if x.confirmed}
+    assert {"fridge", "microwave", "table", "drink cup"} <= set(by_label)
+    for lab, (_, size, y) in by_label.items():
+        err = (np.degrees(y - th) + 45) % 90 - 45
+        assert abs(err) < 3.0, (lab, np.degrees(y))
+    # the fridge's front face (0.5 m along room y) is fully seen: its width along that axis is recovered
+    _, size, y = by_label["fridge"]
+    width = size[1] if abs((np.degrees(y - th) + 45) % 90 - 45) < 45 else size[0]
+    assert abs(width - 0.5) < 0.08, size
