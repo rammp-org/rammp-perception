@@ -93,6 +93,8 @@ DEFAULTS = dict(
     room_min_ratio=1.5,
     room_decay=0.998,  # per detector frame
     room_alpha=0.1,  # low-pass on the room heading; the last confident value holds while the peak is weak
+    room_every=5,  # detector frames between room-heading updates (the room does not move)
+    yaw_enough=3000,  # a large object's face histogram this full needs no new normals (they cost most of an update)
     pts_keep={
         "fridge": 30,
         "microwave": 30,
@@ -100,6 +102,33 @@ DEFAULTS = dict(
         "small": 1,
     },  # measurements' points kept per track
     pts_per_meas=300,
+    # size of large objects: six face positions (x_lo, x_hi, y_lo, y_hi, z_lo, z_hi in the box frame). Each is the
+    # weighted outer quantile (face_quantile; the lo faces the mirror one) of its measurement history: partial masks
+    # pull a face in and mask bleed pushes it out, both biased, so the face is what the good views agree on rather
+    # than a mean. Weights: 1 / sigma^2 with sigma = a + b z^2 (close views count most), times the detection score,
+    # fading with age (face_tau, follows odom drift). A face cut by the image border, hidden behind something nearer,
+    # or turned away from the camera is only a bound (the object reaches at least there) and counts at half weight.
+    face_sigma=(0.02, 0.012),
+    face_quantile=(
+        0.75,
+        0.75,
+        0.5,
+    ),  # x, y, z faces: z by median (things on a table top bleed upward)
+    face_tau=60.0,
+    face_hist=150,
+    face_back_cos=0.7,  # a face this far turned away from the camera is not seen
+    # free space: when the latest view puts a side face carve_min inside the box and the camera sees through
+    # the slab between (depth behind it) on carve_frames detector frames in a row, that slab is empty (a door that
+    # closed, mask bleed) and the face restarts from that view
+    carve_min=0.08,
+    carve_frames=3,
+    carve_through=0.6,  # fraction of the slab's in-view samples with depth clearly behind them
+    min_depth={
+        "fridge": 0.45,
+        "microwave": 0.3,
+        "table": 0.4,
+    },  # for an axis whose far face was never seen
+    floor_groups=("table",),  # boxes that reach the floor (z_lo = 0)
 )
 
 
@@ -199,31 +228,30 @@ def vertical_face_yaws(
         D = depth_mm[y0:y1, x0:x1]
         if mask is not None:
             mask = mask[y0:y1, x0:x1]
-    H_, W_ = D.shape
-    if H_ <= 2 * s + 1 or W_ <= 2 * s + 1:
+    # sample every `step` px first; neighbours are k cells (~s px) away on that grid
+    z = np.asarray(D[::step, ::step], dtype=np.float64) / 1000.0
+    k = max(1, int(round(s / step)))
+    if z.shape[0] <= 2 * k or z.shape[1] <= 2 * k:
         return np.zeros(0)
-    z = np.asarray(D, dtype=np.float64) / 1000.0
-    R_, C_ = np.meshgrid(
-        np.arange(s, H_ - s, step), np.arange(s, W_ - s, step), indexing="ij"
+    v, u = np.mgrid[0 : z.shape[0], 0 : z.shape[1]]
+    P = np.stack(
+        [
+            (u * step + x0 - K[0, 2]) * z / K[0, 0],
+            (v * step + y0 - K[1, 2]) * z / K[1, 1],
+            z,
+        ],
+        -1,
     )
-
-    def lift(r, c):
-        zz = z[r, c]
-        return np.stack(
-            [(c + x0 - K[0, 2]) * zz / K[0, 0], (r + y0 - K[1, 2]) * zz / K[1, 1], zz],
-            -1,
-        )
-
-    dx = lift(R_, C_ + s) - lift(R_, C_ - s)
-    dy = lift(R_ + s, C_) - lift(R_ - s, C_)
-    zc = z[R_, C_]
+    dx = P[k:-k, 2 * k :] - P[k:-k, : -2 * k]
+    dy = P[2 * k :, k:-k] - P[: -2 * k, k:-k]
+    zc = z[k:-k, k:-k]
     ok = (zc > zlim[0]) & (zc < zlim[1])
-    for zz in (z[R_, C_ + s], z[R_, C_ - s], z[R_ + s, C_], z[R_ - s, C_]):
-        ok &= zz > 0
+    ok &= (z[k:-k, 2 * k :] > 0) & (z[k:-k, : -2 * k] > 0)
+    ok &= (z[2 * k :, k:-k] > 0) & (z[: -2 * k, k:-k] > 0)
     # not across a depth edge
     ok &= (np.abs(dx[..., 2]) < 0.1 * zc) & (np.abs(dy[..., 2]) < 0.1 * zc)
     if mask is not None:
-        ok &= np.asarray(mask)[R_, C_]
+        ok &= np.asarray(mask)[::step, ::step][k:-k, k:-k]
     n = np.cross(dx[ok], dy[ok])
     nn = np.linalg.norm(n, axis=1)
     n = n[nn > 1e-9] / nn[nn > 1e-9, None]
@@ -282,6 +310,13 @@ class Track:
         "label_shown",
         "yaw_hist",
         "pts",
+        "anchor",
+        "faces",
+        "fhist",
+        "fseen",
+        "fcarve",
+        "face_yaw",
+        "face_t",
     )
 
     @property
@@ -305,7 +340,8 @@ class Odom3DTracker:
         self.next_id = 1
         self.room_hist = np.zeros(YAW_BINS)
         self._room_yaw = None
-        self._rng = np.random.default_rng(0)
+        self._n_updates = 0
+        self._boxes = None  # boxes() cache, valid until the next update()
 
     # ------------------------------------------------------------ measurements
     def _measure(self, d, depth_mm, T_oc):
@@ -366,21 +402,23 @@ class Odom3DTracker:
                 size=np.maximum(hi - lo, 0.03),
                 z=float(np.median(P[:, 2])),
                 bottom=float(lo[2]),
-                pts=Po
-                if len(Po) <= self.p["pts_per_meas"]
+                pc=P,
+                po=Po,
+                depth=depth_mm,
+                pts=None
+                if g in LARGE  # large objects use their faces, not kept points
                 else Po[
-                    self._rng.choice(len(Po), self.p["pts_per_meas"], replace=False)
+                    np.linspace(0, len(Po) - 1, min(len(Po), self.p["pts_per_meas"]))
+                    .round()
+                    .astype(int)
                 ],
-                yaw_hist=yaw_histogram(
-                    vertical_face_yaws(depth_mm, self.K, T_oc[:3, :3], mask, b)
-                )
-                if g in LARGE
-                else None,
+                mask=mask,
+                R_oc=T_oc[:3, :3],
             )
             if (
                 np.max(m["size"]) > self.p["max_size"][g]
             ):  # gross lift failure -> 2D-only measurement
-                m.update(c=None, size=None, lo=None, hi=None, pts=None, yaw_hist=None)
+                m.update(c=None, size=None, lo=None, hi=None, pts=None)
         m["birth_ok"] = m["c"] is not None and self._plausible(m)
         if m["c"] is None and d["kind"] == "tv":
             return None  # a tv we cannot place in 3D is never evidence for a fridge
@@ -467,9 +505,13 @@ class Odom3DTracker:
         p = self.p
         T_oc = np.asarray(T_odom_cam, dtype=np.float64)
         T_co = np.linalg.inv(T_oc)
-        if depth_mm is not None:  # room heading from every vertical surface in view
+        self._boxes = None
+        self._n_updates += 1
+        if depth_mm is not None and (
+            self._room_yaw is None or self._n_updates % p["room_every"] == 0
+        ):  # room heading from every vertical surface in view
             self.room_hist = self.p["room_decay"] * self.room_hist + yaw_histogram(
-                vertical_face_yaws(depth_mm, self.K, T_oc[:3, :3], step=6)
+                vertical_face_yaws(depth_mm, self.K, T_oc[:3, :3], step=6, s=6)
             )
             y = yaw_peak(self.room_hist, p["room_min_mass"], p["room_min_ratio"])
             if y is not None:
@@ -603,10 +645,13 @@ class Odom3DTracker:
         tr.bb = self._billboard(m["box"], m["z"], T_oc)
         tr.p_exist, tr.hits, tr.first_t, tr.last_hit_t = 0.5, 1, t, t
         tr.hist = {}
-        tr.pts = [m["pts"]]
-        tr.yaw_hist = (
-            m["yaw_hist"].copy() if m["yaw_hist"] is not None else np.zeros(YAW_BINS)
-        )
+        tr.pts = [m["pts"]] if m["pts"] is not None else []
+        tr.yaw_hist = np.zeros(YAW_BINS)
+        if tr.group in LARGE:
+            tr.yaw_hist += self._face_yaw_hist(m)
+        tr.faces = None
+        if tr.group in LARGE:
+            self._init_faces(tr, m, t, T_oc)
         self._vote(tr, m)
         tr.confirmed, tr.score, tr.label_shown = False, m["score"], None
         tr.max_score = m["score"] if m["kind"] != "tv" else 0.0
@@ -638,9 +683,14 @@ class Odom3DTracker:
                 arr += np.where(outward, 0.1 if m["partial"] else 0.3, 0.03) * (
                     new - arr
                 )
-            tr.pts = (tr.pts + [m["pts"]])[-p["pts_keep"][tr.group] :]
-            if m["yaw_hist"] is not None:
-                tr.yaw_hist = p["yaw_decay"] * tr.yaw_hist + m["yaw_hist"]
+            if m["pts"] is not None:
+                tr.pts = (tr.pts + [m["pts"]])[-p["pts_keep"][tr.group] :]
+            if tr.group in LARGE:
+                tr.yaw_hist *= p["yaw_decay"]
+                if tr.yaw_hist.sum() < p["yaw_enough"]:
+                    tr.yaw_hist += self._face_yaw_hist(m)
+            if tr.faces is not None:
+                self._update_faces(tr, m, t, T_oc)
             z = m["z"]
         else:
             z = float(transform(T_co, tr.c[None])[0, 2])
@@ -740,6 +790,243 @@ class Odom3DTracker:
             tr.label_shown = best  # hysteresis: a new label must clearly win
         return tr.label_shown
 
+    def _face_yaw_hist(self, m):
+        if m.get("depth") is None or m.get("mask") is None:
+            return np.zeros(YAW_BINS)
+        return yaw_histogram(
+            vertical_face_yaws(m["depth"], self.K, m["R_oc"], m["mask"], m["box"])
+        )
+
+    # ------------------------------------------------------------ box faces (large objects)
+    def _track_yaw(self, tr):
+        y = yaw_peak(tr.yaw_hist, self.p["yaw_min_mass"], self.p["yaw_min_ratio"])
+        if y is None:
+            y = self._room_yaw if self._room_yaw is not None else 0.0
+        return y
+
+    def _face_frame(self, tr, yaw):
+        """Re-express the faces in heading yaw. Headings are mod 90 deg, so a step past 45 deg is a quarter turn of
+        the box axes: turning the frame +90 deg makes new x = old y and new y = -old x."""
+        k = int(np.round((yaw - tr.face_yaw) / (np.pi / 2))) % 4
+        for _ in range(k):
+            h = tr.fhist
+            neg = lambda a: a * np.array([1.0, -1.0, 1.0])  # noqa: E731
+            tr.fhist = [h[2], h[3], neg(h[1]), neg(h[0]), h[4], h[5]]
+            tr.fseen = tr.fseen[[2, 3, 1, 0, 4, 5]]
+            tr.fcarve = tr.fcarve[[2, 3, 1, 0, 4, 5]]
+            f = tr.faces
+            tr.faces = np.array([f[2], f[3], -f[1], -f[0], f[4], f[5]])
+        tr.face_yaw = yaw
+
+    def _face_meas(self, tr, m, T_oc, yaw):
+        """Per face (x_lo, x_hi, y_lo, y_hi, z_lo, z_hi; xy relative to the track's anchor in the box frame): the
+        measured position, its variance, and whether it is only a bound: the object reaches at least there."""
+        p = self.p
+        Pc, Po = m["pc"], m["po"]
+        if (
+            len(Pc) > 500
+        ):  # percentiles and edge tests need far fewer points than the lift gives
+            i = np.linspace(0, len(Pc) - 1, 500).astype(int)
+            Pc, Po = Pc[i], Po[i]
+        R = rot2(yaw)
+        loc = np.c_[(Po[:, :2] - tr.anchor) @ R, Po[:, 2]]
+        lo, hi = np.percentile(loc, [4, 96], axis=0)
+        # surface points spread evenly along x and y: the trimmed 4 % per side is the extent's ends, not noise
+        ext = (hi[:2] - lo[:2]) * 0.04 / 0.92
+        lo[:2], hi[:2] = lo[:2] - ext, hi[:2] + ext
+        u = self.K[0, 0] * Pc[:, 0] / Pc[:, 2] + self.K[0, 2]
+        v = self.K[1, 1] * Pc[:, 1] / Pc[:, 2] + self.K[1, 2]
+        uc, vc = float(np.median(u)), float(np.median(v))
+        cam = (T_oc[:2, 3] - tr.anchor) @ R
+        z = m["z"]
+        sig = (p["face_sigma"][0] + p["face_sigma"][1] * z * z) / np.sqrt(
+            max(m["score"], 0.1)
+        )
+        D, e = m.get("depth"), 4
+        val = np.zeros(6)
+        var = np.full(6, sig * sig)
+        # 0: seen; 1: turned away (only its far edge, from the near faces: a fair estimate that may come up short);
+        # 2: cut by the image border, hidden, or too few points (the object surely reaches further: push-out only)
+        bound = np.zeros(6, int)
+        for j in range(6):
+            ax, side = j // 2, (1 if j % 2 else -1)
+            val[j] = hi[ax] if side > 0 else lo[ax]
+            sel = (
+                loc[:, ax] >= hi[ax] - 0.03 if side > 0 else loc[:, ax] <= lo[ax] + 0.03
+            )
+            if sel.sum() < 3:
+                bound[j] = 2
+                continue
+            if (
+                ax < 2
+            ):  # a face turned away from the camera: only the near faces' far edge is seen
+                n = np.zeros(2)
+                n[ax] = side
+                w = loc[sel, :2].mean(0) - cam
+                if n @ w / (np.linalg.norm(w) + 1e-9) > p["face_back_cos"]:
+                    bound[j] = 1
+            uu, vv = u[sel], v[sel]
+            if (
+                uu.min() <= e
+                or uu.max() >= self.W - 1 - e
+                or vv.min() <= e
+                or vv.max() >= self.H - 1 - e
+            ):
+                bound[j] = 2  # cut by the image border
+                continue
+            if (
+                D is not None
+            ):  # hidden: just outside the silhouette, depth is clearly nearer
+                idx = np.linspace(0, sel.sum() - 1, min(15, int(sel.sum()))).astype(int)
+                us, vs, zs = uu[idx], vv[idx], Pc[sel, 2][idx]
+                d = np.stack([us - uc, vs - vc], 1)
+                d /= np.linalg.norm(d, axis=1, keepdims=True) + 1e-9
+                uo = np.clip((us + 8 * d[:, 0]).astype(int), 0, self.W - 1)
+                vo = np.clip((vs + 8 * d[:, 1]).astype(int), 0, self.H - 1)
+                zo = np.asarray(D)[vo, uo] / 1000.0
+                if ((zo > 0.1) & (zo < zs - 0.15)).mean() > 0.4:
+                    bound[j] = 2
+        return val, var, bound
+
+    def _init_faces(self, tr, m, t, T_oc):
+        tr.anchor = m["c"][:2].copy()
+        tr.face_yaw = self._track_yaw(tr)
+        tr.faces = np.zeros(6)
+        tr.fhist = [np.zeros((0, 3)) for _ in range(6)]  # rows: t, value, weight
+        tr.fseen = np.zeros(6, bool)
+        tr.fcarve = np.zeros(6, int)
+        self._add_face_meas(tr, m, t, T_oc)
+
+    def _update_faces(self, tr, m, t, T_oc):
+        self._face_frame(tr, self._track_yaw(tr))
+        val, bound = self._add_face_meas(tr, m, t, T_oc)
+        if m.get("depth") is not None:
+            self._carve(tr, val, bound, t, T_oc, m["depth"])
+
+    def _slab_seen_through(self, tr, j, val, T_oc, depth_mm):
+        """Is the slab of the box between side face j and this view's face (val[j]) seen empty: in view, and the
+        depth image showing surfaces clearly behind it? A slab hidden behind the object's own front or anything else
+        is not. Across the other axes it spans only what this view measured, so a box deeper than the object (a
+        depth never seen) cannot make the floor behind the object count as seeing through it."""
+        f = tr.faces
+        ax, side = j // 2, (1 if j % 2 else -1)
+        lo, hi = sorted((val[j] + side * 0.02, f[j]))
+        o0, o1 = (2, 3) if ax == 0 else (0, 1)
+        other = (max(f[o0], val[o0]), min(f[o1], val[o1]))
+        if other[1] - other[0] < 0.03:
+            return False
+        g = np.linspace(0.1, 0.9, 5)
+        a = lo + (hi - lo) * g
+        b = other[0] + (other[1] - other[0]) * g
+        # a table is mostly empty under its top (the camera sees between the legs): only its top band can be
+        # seen through
+        z1 = min(f[5], val[5])
+        z0 = max(
+            f[4], val[4], z1 - 0.08 if tr.group in self.p["floor_groups"] else -np.inf
+        )
+        if z1 - z0 < 0.02:
+            return False
+        zz = z0 + (z1 - z0) * g
+        A, B, Z = np.meshgrid(a, b, zz, indexing="ij")
+        local = np.stack([A, B] if ax == 0 else [B, A], -1).reshape(-1, 2)
+        P = np.c_[tr.anchor + local @ rot2(tr.face_yaw).T, Z.reshape(-1)]
+        Pc = transform(np.linalg.inv(T_oc), P)
+        ok = Pc[:, 2] > 0.2
+        u = np.full(len(Pc), -1)
+        v = np.full(len(Pc), -1)
+        u[ok] = np.round(self.K[0, 0] * Pc[ok, 0] / Pc[ok, 2] + self.K[0, 2]).astype(
+            int
+        )
+        v[ok] = np.round(self.K[1, 1] * Pc[ok, 1] / Pc[ok, 2] + self.K[1, 2]).astype(
+            int
+        )
+        ok &= (u >= 0) & (u < self.W) & (v >= 0) & (v < self.H)
+        if ok.sum() < 0.5 * len(Pc):
+            return False
+        d = np.asarray(depth_mm)[v[ok], u[ok]] / 1000.0
+        valid = d > 0.1
+        if valid.sum() < 0.5 * ok.sum():
+            return False
+        through = d[valid] > Pc[ok, 2][valid] + 0.1
+        return through.mean() >= self.p["carve_through"]
+
+    def _carve(self, tr, val, bound, t, T_oc, depth_mm):
+        p = self.p
+        for j in range(4):
+            side = 1 if j % 2 else -1
+            # a bound face is checked too: if its slab is hidden (behind the object or something else) or out of
+            # the image, it is never seen through, so the check itself decides what can be carved
+            inside = (tr.faces[j] - val[j]) * side
+            if inside < p["carve_min"]:
+                tr.fcarve[j] = 0
+                continue
+            if not self._slab_seen_through(tr, j, val, T_oc, depth_mm):
+                tr.fcarve[j] = 0
+                continue
+            tr.fcarve[j] += 1
+            if tr.fcarve[j] >= p["carve_frames"]:
+                # the face restarts from the view that saw the slab empty: dropping only the history beyond it
+                # would hand the face to whatever partial views remain inside
+                h = tr.fhist[j]
+                tr.fhist[j] = np.array([[t, val[j], np.median(h[:, 2])]])
+                tr.faces[j] = val[j]
+                tr.fcarve[j] = 0
+
+    def _add_face_meas(self, tr, m, t, T_oc):
+        p = self.p
+        val, var, bound = self._face_meas(tr, m, T_oc, tr.face_yaw)
+        w0 = m["score"] / var
+        for j in range(6):
+            if j == 4 and tr.group in p["floor_groups"]:
+                tr.faces[4] = 0.0
+                continue
+            side = 1 if j % 2 else -1
+            if (
+                bound[j] == 2
+                and len(tr.fhist[j])
+                and (val[j] - tr.faces[j]) * side <= 0
+            ):
+                continue  # a cut-off or hidden face inside the box says nothing
+            if not bound[j]:
+                tr.fseen[j] = True
+            row = [[t, val[j], w0[j] * (0.5 if bound[j] else 1.0)]]
+            tr.fhist[j] = np.concatenate([tr.fhist[j], row])[-p["face_hist"] :]
+            tr.faces[j] = self._face_quantile(tr, j, t)
+        return val, bound
+
+    @staticmethod
+    def _wquantile(v, w, q):
+        o = np.argsort(v)
+        cw = np.cumsum(w[o])
+        return float(v[o][min(int(np.searchsorted(cw, q * cw[-1])), len(v) - 1)])
+
+    def _face_quantile(self, tr, j, t):
+        """Face j: the weighted outer quantile of its whole history (age-faded weights; a bound counts at half
+        weight). Bounds inside the face count too, so a few stray masks cannot ratchet a face outward."""
+        p, h = self.p, tr.fhist[j]
+        v = h[:, 1]
+        ww = h[:, 2] * np.exp(-(t - h[:, 0]) / p["face_tau"])
+        q = p["face_quantile"][j // 2]
+        return self._wquantile(v, ww, q if j % 2 else 1 - q)
+
+    def _face_box(self, tr):
+        """(centre in odom, size along the box axes, heading) from the faces; an axis whose far face was never seen
+        is given at least the class's min_depth, on the unseen side."""
+        f = tr.faces.copy()
+        need = self.p["min_depth"][tr.group]
+        unseen = ~tr.fseen
+        for ax in (0, 1):
+            a, b = 2 * ax, 2 * ax + 1
+            if f[b] - f[a] < need:
+                if unseen[b] and not unseen[a]:
+                    f[b] = f[a] + need
+                elif unseen[a] and not unseen[b]:
+                    f[a] = f[b] - need
+        mid = np.array([(f[0] + f[1]) / 2, (f[2] + f[3]) / 2])
+        c = np.r_[tr.anchor + rot2(tr.face_yaw) @ mid, (f[4] + f[5]) / 2]
+        size = np.maximum([f[1] - f[0], f[3] - f[2], f[5] - f[4]], 0.03)
+        return c, size, tr.face_yaw
+
     # ------------------------------------------------------------ orientation
     def room_yaw(self):
         """Room heading in odom (rad, mod 90 deg), or None before the first confident estimate."""
@@ -759,6 +1046,9 @@ class Odom3DTracker:
         """tid -> (centre in odom, size along the box axes, heading in odom [rad]) for confirmed tracks.
         Large objects: own faces, else the room. Small objects: the large object they stand on/in, else the room.
         Small objects keep the filtered centre (they can be carried); large ones are fit to their kept points."""
+        if tracks is None and self._boxes is not None:
+            return self._boxes
+        cache = tracks is None
         tracks = [
             t for t in (tracks if tracks is not None else self.tracks) if t.confirmed
         ]
@@ -768,6 +1058,9 @@ class Odom3DTracker:
         for tr in tracks:
             if tr.group not in LARGE:
                 continue
+            if tr.faces is not None:
+                out[tr.id] = self._face_box(tr)
+                continue
             yaw = yaw_peak(tr.yaw_hist, self.p["yaw_min_mass"], self.p["yaw_min_ratio"])
             yaw = room if yaw is None else yaw
             c, size = self._fit(tr, yaw) if tr.pts else (tr.c, tr.size)
@@ -776,8 +1069,7 @@ class Odom3DTracker:
             if tr.group in LARGE:
                 continue
             yaw = room
-            _, size0 = self._fit(tr, room) if tr.pts else (None, tr.size)
-            bottom = tr.c[2] - size0[2] / 2
+            bottom = tr.c[2] - tr.size[2] / 2
             best = None
             for sid, (sc, ss, sy) in out.items():
                 q = np.abs(rot2(sy).T @ (tr.c[:2] - sc[:2]))
@@ -790,6 +1082,8 @@ class Odom3DTracker:
                 yaw = best[1]
             size = self._fit(tr, yaw)[1] if tr.pts else tr.size
             out[tr.id] = (tr.c.copy(), size, yaw)
+        if cache:
+            self._boxes = out
         return out
 
     # ------------------------------------------------------------ output

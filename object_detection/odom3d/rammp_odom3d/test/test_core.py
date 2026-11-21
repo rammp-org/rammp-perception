@@ -210,3 +210,64 @@ def test_boxes_take_the_heading_of_their_faces():
     _, size, y = by_label["fridge"]
     width = size[1] if abs((np.degrees(y - th) + 45) % 90 - 45) < 45 else size[0]
     assert abs(width - 0.5) < 0.08, size
+
+
+def test_box_size_holds_through_partial_masks():
+    """Every third detection of the table segments only its left half (under-segmentation, not cut by the image
+    border). The box keeps the table's real size and stops changing once seen, instead of following each mask."""
+    tr = Odom3DTracker(K, W, H)
+    sizes = []
+    for k, t, yaw in sweep(150, amp=0.4):
+        T = T_odom_cam(yaw)
+        D, objs = render_scene(T, [TABLE])
+        if k % 3 == 0 and objs[0] is not None:
+            box, mask = objs[0]
+            if k % 9 == 0:  # left half only
+                mask = mask.copy()
+                mask[:, int((box[0] + box[2]) / 2) :] = False
+                ys, xs = np.nonzero(mask)
+                box = np.array([xs.min(), ys.min(), xs.max(), ys.max()], float)
+            tr.update(
+                t, T, D, [dict(kind="dining table", score=0.8, box=box, mask=mask)]
+            )
+        out = tr.render(t, T, D)
+        if out:
+            sizes.append(
+                np.sort(out[0]["size"][:2])[::-1].tolist() + [out[0]["size"][2]]
+            )
+    sizes = np.array(sizes)
+    late = sizes[len(sizes) // 2 :]
+    assert abs(late[-1, 0] - 1.1) < 0.1, late[-1]  # long side (room y)
+    assert abs(late[-1, 2] - 0.75) < 0.05, late[-1]  # floor to top
+    assert np.ptp(late, axis=0).max() < 0.05, np.ptp(late, axis=0)
+
+
+def test_box_shrinks_back_after_a_door_closes():
+    """The fridge's mask includes its open door (swung flat to the side) for 4 s, then the door closes. While open
+    the box may cover the door; once closed, the space where the door was is seen empty (the wall shows through)
+    and the box returns to the body within ~1 s, not once the open-door views fade out of the history."""
+    wall = (np.array([3.4, -3.0, 0.0]), np.array([3.5, 3.0, 2.4]))
+    door = (np.array([1.97, 0.8, 0.05]), np.array([2.0, 1.3, 0.85]))
+    tr = Odom3DTracker(K, W, H)
+    widths = []
+    for k, t, yaw in sweep(240, amp=0.3):
+        is_open = 30 <= k < 90
+        T = T_odom_cam(yaw)
+        scene = [FRIDGE, wall] + ([door] if is_open else [])
+        D, objs = render_scene(T, scene)
+        if k % 3 == 0 and objs[0] is not None:
+            mask = objs[0][1] | (
+                objs[2][1] if is_open and objs[2] is not None else False
+            )
+            ys, xs = np.nonzero(mask)
+            box = np.array([xs.min(), ys.min(), xs.max(), ys.max()], float)
+            tr.update(
+                t, T, D, [dict(kind="refrigerator", score=0.8, box=box, mask=mask)]
+            )
+        out = tr.render(t, T, D)
+        if out:
+            widths.append((k, max(out[0]["size"][:2])))
+    w = dict(widths)
+    assert w[87] > 0.8, w[87]  # covers the open door
+    assert abs(w[105] - 0.5) < 0.08, w[105]  # 1 s after closing: back to the 0.5 m body
+    assert abs(w[239] - 0.5) < 0.08, w[239]
