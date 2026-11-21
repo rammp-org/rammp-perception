@@ -89,6 +89,11 @@ def matrix_from_pose(x, y, z, qx, qy, qz, qw) -> np.ndarray:
     return T
 
 
+def rot_z(a: float) -> np.ndarray:
+    c, s_ = np.cos(a), np.sin(a)
+    return np.array([[c, -s_, 0.0], [s_, c, 0.0], [0.0, 0.0, 1.0]])
+
+
 def quaternion_from_matrix(R) -> tuple[float, float, float, float]:
     tr = R[0, 0] + R[1, 1] + R[2, 2]
     if tr > 0:
@@ -413,9 +418,6 @@ class Odom3dNode(Node):
                 stamp_s(info.header), T, D, self.publish_out_of_view
             )
         R_co = np.linalg.inv(T)[:3, :3]
-        q = quaternion_from_matrix(
-            R_co
-        )  # odom (gravity-aligned box) axes in the camera frame
         out = ObjectDetections()
         out.header = info.header
         for o in objs:
@@ -442,7 +444,9 @@ class Odom3dNode(Node):
                 d.pose.orientation.y,
                 d.pose.orientation.z,
                 d.pose.orientation.w,
-            ) = (float(v) for v in q)
+            ) = (
+                float(v) for v in quaternion_from_matrix(R_co @ rot_z(o["yaw"]))
+            )  # camera <- box: gravity-aligned, turned by the object's heading about odom z
             d.size = Vector3(
                 x=float(o["size"][0]), y=float(o["size"][1]), z=float(o["size"][2])
             )
@@ -461,12 +465,13 @@ class Odom3dNode(Node):
         clear.action = Marker.DELETEALL
         arr.markers.append(clear)
         with self.lock:
+            boxes = self.tracker.boxes()
             tracks = [
-                (tr.id, self.tracker.label(tr), tr.c.copy(), tr.size.copy(), tr.dormant)
+                (tr.id, self.tracker.label(tr), *boxes[tr.id], tr.dormant)
                 for tr in self.tracker.tracks
                 if tr.confirmed
             ]
-        for tid, label, c, s, dormant in tracks:
+        for tid, label, c, s, yaw, dormant in tracks:
             for kind in (Marker.CUBE, Marker.TEXT_VIEW_FACING):
                 m = Marker()
                 m.header.frame_id, m.header.stamp = self.odom_frame, stamp
@@ -481,7 +486,8 @@ class Odom3dNode(Node):
                     y=float(c[1]),
                     z=float(c[2] + (s[2] / 2 + 0.1 if kind != Marker.CUBE else 0.0)),
                 )
-                m.pose.orientation.w = 1.0
+                m.pose.orientation.z = float(np.sin(yaw / 2))
+                m.pose.orientation.w = float(np.cos(yaw / 2))
                 if kind == Marker.CUBE:
                     m.scale = Vector3(
                         x=float(max(s[0], 0.05)),
